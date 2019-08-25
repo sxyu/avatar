@@ -127,8 +127,7 @@ void randomizeParams(HumanAvatar& ava, double shape_sigma = 1.0) {
 
     // Root rotation
     const Eigen::Vector3d axis_up(0., 1., 0.);
-    double angle_up  = random_util::uniform(0.0, std::sqrt(2 * PI));
-    angle_up *= angle_up;
+    double angle_up  = random_util::uniform(-PI / 2., PI / 2.) + PI;
     Eigen::AngleAxisd aa_up(angle_up, axis_up);
 
     double theta = random_util::uniform(0, 2 * PI);
