@@ -111,7 +111,7 @@ foreach( DEFINITION ${PCL_DEFINITIONS} )
   set( TARGET_COMPILE_FLAGS "${TARGET_COMPILE_FLAGS} ${DEFINITION}" )
 endforeach()
 
-add_executable( ${PROJ_NAME} sample.cpp )
+add_executable( ${PROJ_NAME} smplsynth.cpp )
 target_include_directories( ${PROJ_NAME} PRIVATE ${INCLUDE_DIR} )
 set_target_properties( ${PROJ_NAME} PROPERTIES OUTPUT_NAME ${OUTPUT_NAME} )
 target_link_libraries( ${PROJ_NAME} ${DEPENDENCIES} )
