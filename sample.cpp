@@ -28,15 +28,6 @@ namespace {
 using namespace ark;
 
 namespace random_util {
-
-template<class T>
-/** mersenne twister PRNG */
-inline T randint_mt(T lo, T hi) {
-    thread_local static std::mt19937 rg(std::random_device{}());
-    std::uniform_int_distribution<T> pick(lo, hi);
-    return pick(rg);
-}
-
 template<class T>
 /** xorshift-based PRNG */
 inline T randint(T lo, T hi) {
