@@ -39,4 +39,17 @@ namespace ark {
             return (path(rootDir) / path(root_path)).string();
         }
     }
+    namespace random_util {
+        float uniform(float min_inc, float max_exc) {
+            thread_local static std::mt19937 rg(std::random_device{}());
+            std::uniform_real_distribution<float> uniform(min_inc, max_exc); 
+            return uniform(rg); 
+        }
+
+        float randn(float mean, float variance) {
+            thread_local static std::mt19937 rg(std::random_device{}());
+            std::normal_distribution<float> normal(mean, variance); 
+            return normal(rg); 
+        }
+    }
 }

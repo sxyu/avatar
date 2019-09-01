@@ -103,6 +103,7 @@ set(
   HEADERS
   ${INCLUDE_DIR}/Avatar.h
   ${INCLUDE_DIR}/Calibration.h
+  ${INCLUDE_DIR}/Config.h
   ${INCLUDE_DIR}/GaussianMixture.h
   ${INCLUDE_DIR}/Util.h
   ${INCLUDE_DIR}/Version.h

@@ -1,4 +1,4 @@
-/** This module is not strictly needed, hels us re-generate part-label masks on existing dataset */
+/** This module is not strictly needed, helps us re-generate part-label masks on existing dataset */
 #include <fstream>
 #include <string>
 #include <vector>
@@ -18,6 +18,7 @@
 
 #include "Avatar.h"
 #include "Calibration.h"
+#include "Config.h"
 #include "Util.h"
 
 //#define DEBUG_PROPOSE
@@ -155,7 +156,7 @@ void run(int num_threads, int max_num_to_gen, std::string out_path, const cv::Si
             skelIfs >> id >> weight;
             if (weight > largestWeight) {
                 largestWeight = weight;
-                assignedJoint[i] = id;
+                assignedJoint[i] = PartMap::SMPL_JOINT_TO_PART_MAP[id];
             }
         }
     }

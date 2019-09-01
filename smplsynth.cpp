@@ -17,6 +17,7 @@
 #include <boost/thread.hpp>
 
 #include "Avatar.h"
+#include "Config.h"
 #include "GaussianMixture.h"
 #include "Calibration.h"
 #include "Util.h"
@@ -28,37 +29,6 @@ constexpr char WIND_NAME[] = "Result";
 
 namespace {
 using namespace ark;
-
-namespace random_util {
-template<class T>
-/** xorshift-based PRNG */
-inline T randint(T lo, T hi) {
-    if (hi <= lo) return lo;
-    static unsigned long x = std::random_device{}(), y = std::random_device{}(), z = std::random_device{}();
-    unsigned long t;
-    x ^= x << 16;
-    x ^= x >> 5;
-    x ^= x << 1;
-    t = x;
-    x = y;
-    y = z;
-    z = t ^ x ^ y;
-    return z % (hi - lo + 1) + lo;
-}
-
-inline float uniform(float min_inc = 0., float max_exc = 1.) {
-    thread_local static std::mt19937 rg(std::random_device{}());
-    std::uniform_real_distribution<float> uniform(min_inc, max_exc); 
-    return uniform(rg); 
-}
-
-inline float randn(float mean = 0, float variance = 1) {
-    thread_local static std::mt19937 rg(std::random_device{}());
-    std::normal_distribution<float> normal(mean, variance); 
-    return normal(rg); 
-}
-
-} // random_util
 
 void getJoints(HumanAvatar& ava,
                const CameraIntrin& intrin,
@@ -338,7 +308,7 @@ void run(int num_threads, int num_to_gen, std::string out_path, const cv::Size& 
             skelIfs >> id >> weight;
             if (weight > largestWeight) {
                 largestWeight = weight;
-                assignedJoint[i] = id;
+                assignedJoint[i] = PartMap::SMPL_JOINT_TO_PART_MAP[id];
             }
         }
     }
