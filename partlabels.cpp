@@ -1,3 +1,4 @@
+/** This module is not strictly needed, hels us re-generate part-label masks on existing dataset */
 #include <fstream>
 #include <string>
 #include <vector>
@@ -8,17 +9,16 @@
 #include "opencv2/core.hpp"
 #include "opencv2/imgproc.hpp"
 #include "opencv2/highgui.hpp"
-//#include <pcl/surface/concave_hull.h>
 #include <pcl/search/impl/search.hpp>
 #include <pcl/conversions.h>
 #include <boost/lockfree/queue.hpp>
 #include <boost/program_options.hpp>
+#include <boost/filesystem.hpp>
+#include <boost/thread.hpp>
 
 #include "Avatar.h"
 #include "Calibration.h"
-#include "HumanDetector.h"
 #include "Util.h"
-//#include "concaveman.h"
 
 //#define DEBUG_PROPOSE
 //#define DEBUG
@@ -30,10 +30,10 @@ using namespace ark;
 inline void paintTriangleNN(
         cv::Mat& output_assigned_joint_mask,
         const cv::Size& image_size,
-        const std::vector<cv::Point2d>& projected,
+        const std::vector<cv::Point2f>& projected,
         const std::vector<int>& assigned_joint,
         const cv::Vec3i& face) {
-    std::pair<double, int> xf[3] =
+    std::pair<float, int> xf[3] =
     {
         {projected[face[0]].x, 0},
         {projected[face[1]].x, 1},
@@ -63,10 +63,10 @@ inline void paintTriangleNN(
         midxi = std::floor(b.x);
 
     if (a.x != b.x) {
-        double mhi = (c.y-a.y)/(c.x-a.x);
-        double bhi = a.y - a.x * mhi;
-        double mlo = (b.y-a.y)/(b.x-a.x);
-        double blo = a.y - a.x * mlo;
+        float mhi = (c.y-a.y)/(c.x-a.x);
+        float bhi = a.y - a.x * mhi;
+        float mlo = (b.y-a.y)/(b.x-a.x);
+        float blo = a.y - a.x * mlo;
         if (b.y > c.y) {
             std::swap(mlo, mhi);
             std::swap(blo, bhi);
@@ -92,10 +92,10 @@ inline void paintTriangleNN(
         }
     }
     if (b.x != c.x) {
-        double mhi = (c.y-a.y)/(c.x-a.x);
-        double bhi = a.y - a.x * mhi;
-        double mlo = (c.y-b.y)/(c.x-b.x);
-        double blo = b.y - b.x * mlo;
+        float mhi = (c.y-a.y)/(c.x-a.x);
+        float bhi = a.y - a.x * mhi;
+        float mlo = (c.y-b.y)/(c.x-b.x);
+        float blo = b.y - b.x * mlo;
         if (b.y > a.y) {
             std::swap(mlo, mhi);
             std::swap(blo, bhi);
@@ -105,8 +105,8 @@ inline void paintTriangleNN(
                 maxyi = std::min<int>(std::ceil(mhi * i + bhi), image_size.height-1);
             if (minyi > maxyi) continue;
 
-            double w1v = (b.y - c.y) * (i - c.x);
-            double w2v = (c.y - a.y) * (i - c.x);
+            float w1v = (b.y - c.y) * (i - c.x);
+            float w2v = (c.y - a.y) * (i - c.x);
             for (int j = minyi; j <= maxyi; ++j) {
                 auto& out = output_assigned_joint_mask.at<uint8_t>(j, i);
                 int dista = (a.x - i) * (a.x - i) + (a.y - j) * (a.y - j);
@@ -149,9 +149,9 @@ void run(int num_threads, int max_num_to_gen, std::string out_path, const cv::Si
     std::vector<int> assignedJoint(nPoints);
     for (int i = 0; i < nPoints; ++i) {
         int nAssign;  skelIfs >> nAssign;
-        double largestWeight = -DBL_MAX;
+        float largestWeight = std::numeric_limits<float>::min();
         for (int j = 0; j < nAssign; ++j) {
-            int id; double weight;
+            int id; float weight;
             skelIfs >> id >> weight;
             if (weight > largestWeight) {
                 largestWeight = weight;
@@ -183,7 +183,7 @@ void run(int num_threads, int max_num_to_gen, std::string out_path, const cv::Si
         if (!boost::filesystem::exists(jointFilePath.string())) break;
         if (!overwrite) {
             auto partMaskFilePath = 
-                partMaskPath / ("part_mask_" + ss_img_id.str() + ".png");
+                partMaskPath / ("part_mask_" + ss_img_id.str() + ".tiff");
             if (boost::filesystem::exists(partMaskFilePath.string())) {
                 continue;
             }
@@ -197,8 +197,8 @@ void run(int num_threads, int max_num_to_gen, std::string out_path, const cv::Si
     };
 
     auto worker = [&]() {
-        HumanAvatar ava(HumanDetector::HUMAN_MODEL_PATH, HumanDetector::HUMAN_MODEL_SHAPE_KEYS);
-        std::vector<cv::Point2d> projected(ava.getCloud()->size());
+        HumanAvatar ava(util::resolveRootPath("data/avatar-model"));
+        std::vector<cv::Point2f> projected(ava.cloud.cols());
 
         std::vector<FaceType> faces;
         faces.reserve(nFaces);
@@ -215,29 +215,34 @@ void run(int num_threads, int max_num_to_gen, std::string out_path, const cv::Si
             std::string jointFilePath = (jointsPath / ("joint_" + ss_img_id.str() + ".yml")).string();
 
             cv::FileStorage fs2(jointFilePath, cv::FileStorage::READ);
-            std::vector<double> p;
+            std::vector<float> p;
             fs2["pos"] >> p;
-            std::vector<double> w;
+            std::vector<float> w;
             fs2["shape"] >> w;
-            std::vector<double> r;
+            std::vector<float> r;
             fs2["rots"] >> r;
             fs2.release();
 
-            std::copy(r.begin(), r.end(), ava.r());
-            std::copy(w.begin(), w.end(), ava.w());
-            std::copy(p.begin(), p.end(), ava.p());
+            std::copy(w.begin(), w.begin() + ava.numShapeKeys(), ava.w.data());
+            std::copy(p.begin(), p.begin() + 3, ava.p.data());
+            for (size_t i = 0; i < ava.r.size(); ++i) {
+                Eigen::Map<Eigen::Vector3f> axis(&r[0] + i*3);
+                Eigen::AngleAxisf aa;
+                aa.angle() = axis.norm();
+                aa.axis() = axis / aa.angle();
+                ava.r[i] = aa.toRotationMatrix();
+            }
 
             ava.update();
 
-            auto modelCloud = ava.getCloud();
-            auto& modelPoints = modelCloud->points;
+            const auto& modelCloud = ava.cloud;
 
             // Compute part labels
-            for (size_t i = 0; i < modelCloud->size(); ++i) {
-                const auto& pt = modelPoints[i];
-                projected[i].x = static_cast<double>(pt.x)
-                                    * intrin.fx / pt.z + intrin.cx;
-                projected[i].y = -static_cast<double>(pt.y) * intrin.fy / pt.z + intrin.cy;
+            for (size_t i = 0; i < ava.cloud.cols(); ++i) {
+                const auto& pt = modelCloud.col(i);
+                projected[i].x = static_cast<float>(pt(0))
+                                    * intrin.fx / pt(2) + intrin.cx;
+                projected[i].y = -static_cast<float>(pt(1)) * intrin.fy / pt(2) + intrin.cy;
             } 
 
             // Sort faces by decreasing center depth
@@ -245,20 +250,20 @@ void run(int num_threads, int max_num_to_gen, std::string out_path, const cv::Si
             for (int i = 0; i < nFaces;++i) {
                 auto& face = faces[i].second;
                 faces[i].first =
-                    (modelPoints[face[0]].z + modelPoints[face[1]].z + modelPoints[face[2]].z) / 3.f;
+                    (modelCloud(2, face[0]) + modelCloud(2, face[1]) + modelCloud(2, face[2])) / 3.f;
             }
             std::sort(faces.begin(), faces.end(), faceComp);
 
             // Paint the faces using nearest neighbors
-            cv::Mat partMaskMap(image_size, CV_8U);
+            cv::Mat partMaskMap = cv::Mat::zeros(image_size, CV_8U);
             partMaskMap.setTo(255);
-            for (int i = 0; i < nFaces;++i) {
+            for (int i = 0; i < nFaces; ++i) {
                 paintTriangleNN(partMaskMap, image_size, projected, assignedJoint, faces[i].second);
             }
 
-            const std::string partMaskImgPath = (partMaskPath / ("part_mask_" + ss_img_id.str() + ".png")).string();
+            const std::string partMaskImgPath = (partMaskPath / ("part_mask_" + ss_img_id.str() + ".tiff")).string();
             cv::imwrite(partMaskImgPath, partMaskMap);
-            cout << "Wrote " << partMaskImgPath << endl;
+            std::cout << "Wrote " << partMaskImgPath << std::endl;
         }
     };
     std::vector<boost::thread> threads;

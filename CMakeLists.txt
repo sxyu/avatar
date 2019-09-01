@@ -5,6 +5,7 @@ if(NOT CMAKE_BUILD_TYPE)
 endif()
 
 project( smplsynth )
+set( INCLUDE_DIR "${PROJECT_SOURCE_DIR}/include" )
 
 set( CMAKE_CXX_STACK_SIZE "10000000" )
 set( CMAKE_CXX_STANDARD 11 )
@@ -66,18 +67,6 @@ if( PCL_FOUND )
    message( STATUS "Found PCL: ${PCL_INCLUDE_DIRS}" )
 endif( PCL_FOUND )
 
-# require OpenARK
-find_package( OpenARK REQUIRED )
-if( OpenARK_FOUND )
-    message( STATUS "Found OpenARK: ${OpenARK_INCLUDE_DIR}" )
-endif( OpenARK_FOUND )
-
-# require K4A
-find_package( k4a REQUIRED )
-if( k4a_FOUND)
-  message( STATUS "Found k4a (Azure Kinect SDK)" )
-endif( k4a_FOUND )
-
 find_package( Boost REQUIRED COMPONENTS system program_options )
 
 # require Ceres
@@ -87,10 +76,10 @@ IF(Ceres_FOUND)
 ENDIF(Ceres_FOUND)
 
 include_directories(
+    ${INCLUDE_DIR}
     ${OpenCV_INCLUDE_DIRS}
     ${PCL_INCLUDE_DIRS}
     ${CERES_INCLUDE_DIRS}
-    ${OpenARK_INCLUDE_DIR}
     ${Boost_INCLUDE_DIRS}
 )
  
@@ -98,10 +87,25 @@ set(
   DEPENDENCIES
   ${OpenCV_LIBRARIES}
   ${PCL_LIBRARIES}
-  ${OpenARK_LIB}
   ${CERES_LIBRARIES}
   ${Boost_LIBRARIES}
-  k4a::k4a
+)
+
+set(
+  SOURCES
+  Avatar.cpp 
+  Calibration.cpp 
+  GaussianMixture.cpp 
+  Util.cpp 
+)
+
+set(
+  HEADERS
+  ${INCLUDE_DIR}/Avatar.h
+  ${INCLUDE_DIR}/Calibration.h
+  ${INCLUDE_DIR}/GaussianMixture.h
+  ${INCLUDE_DIR}/Util.h
+  ${INCLUDE_DIR}/Version.h
 )
 
 add_definitions(
@@ -111,13 +115,13 @@ foreach( DEFINITION ${PCL_DEFINITIONS} )
   set( TARGET_COMPILE_FLAGS "${TARGET_COMPILE_FLAGS} ${DEFINITION}" )
 endforeach()
 
-add_executable( ${PROJ_NAME} smplsynth.cpp )
+add_executable( ${PROJ_NAME} ${SOURCES} ${HEADERS} smplsynth.cpp )
 target_include_directories( ${PROJ_NAME} PRIVATE ${INCLUDE_DIR} )
 set_target_properties( ${PROJ_NAME} PROPERTIES OUTPUT_NAME ${OUTPUT_NAME} )
 target_link_libraries( ${PROJ_NAME} ${DEPENDENCIES} )
 set_target_properties( ${PROJ_NAME} PROPERTIES COMPILE_FLAGS ${TARGET_COMPILE_FLAGS} )
 
-add_executable( ${PART_LABELS_NAME} partlabels.cpp )
+add_executable( ${PART_LABELS_NAME} ${SOURCES} ${HEADERS} partlabels.cpp )
 target_include_directories( ${PART_LABELS_NAME} PRIVATE ${INCLUDE_DIR} )
 set_target_properties( ${PART_LABELS_NAME} PROPERTIES OUTPUT_NAME ${PART_LABELS_NAME} )
 target_link_libraries( ${PART_LABELS_NAME} ${DEPENDENCIES} )
