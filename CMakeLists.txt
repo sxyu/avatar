@@ -75,6 +75,13 @@ IF(Ceres_FOUND)
     MESSAGE(STATUS "Found Ceres: ${CERES_INCLUDE_DIRS} ${CERES_LIBRARIES}")
 ENDIF(Ceres_FOUND)
 
+find_package(OpenMP)
+if (OPENMP_FOUND)
+   message(STATUS "OpenMP found")
+   add_definitions(-DUSE_OPENMP)
+   SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_CXX_FLAGS}")
+endif()
+
 include_directories(
     ${INCLUDE_DIR}
     ${OpenCV_INCLUDE_DIRS}
