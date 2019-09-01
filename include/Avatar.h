@@ -70,6 +70,9 @@ namespace ark {
         /** Current joint positions (3, num joints) */
         CloudType jointPos;
 
+        /** Current joint rotations */
+        std::vector<Eigen::Matrix3f> jointRot;
+
         /** Parent joint index of each joint */
         Eigen::VectorXi parent;
 
@@ -99,6 +102,9 @@ namespace ark {
          *  as in cols of assignVecs and rows of assignWeights (num joints + 1);
          *  terminated with num assignments total */
         Eigen::VectorXi assignStarts;
+
+        /** Assigned cloud */
+        CloudType assignCloud;
 
         /** List of points assigned to each joint with weight*/
         std::vector<std::vector<std::pair<int, float> > > assignedPoints;

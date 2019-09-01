@@ -51,7 +51,7 @@ endif( NOT DEFINED EIGEN_INCLUDE_DIRS )
 if ( NOT DEFINED Eigen_DIR )
     find_package( Eigen QUIET )
 endif ( NOT DEFINED Eigen_DIR )
-set( EIGEN_INCLUDE_DIR EIGEN_INCLUDE_DIRS )
+set( EIGEN_INCLUDE_DIR ${EIGEN_INCLUDE_DIRS} )
 include_directories(${EIGEN_INCLUDE_DIRS})
 message(STATUS "Found Eigen: ${EIGEN_INCLUDE_DIRS}")
 

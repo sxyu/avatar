@@ -371,6 +371,7 @@ void run(int num_threads, int num_to_gen, std::string out_path, const cv::Size& 
 
             randomizeParams(ava, posePrior);
             ava.update();
+            ava.update();
 
             const auto& modelCloud = ava.cloud;
             // Render depth
@@ -460,6 +461,7 @@ void run(int num_threads, int num_to_gen, std::string out_path, const cv::Size& 
             fs3 << "smpl_params" << smplParamsVec;
 
             fs3.release();
+            // std::cout << "Wrote " << jointFilePath << std::endl;
         }
     };
     std::vector<boost::thread> threads;

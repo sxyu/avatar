@@ -2,6 +2,10 @@
 #include <boost/filesystem.hpp>
 #include <boost/smart_ptr.hpp>
 #include <pcl/io/pcd_io.h>
+#include <chrono>
+
+#define BEGIN_PROFILE auto start = std::chrono::high_resolution_clock::now()
+#define PROFILE(x) do{printf("%s: %f ms\n", #x, std::chrono::duration<double, std::milli>(std::chrono::high_resolution_clock::now() - start).count()); start = std::chrono::high_resolution_clock::now(); }while(false)
 
 namespace {
     Eigen::VectorXf loadPCDToPointVector(const std::string& path) {
@@ -110,7 +114,6 @@ namespace ark {
             for (auto& assignment : assignedPoints[i]) {
                 int p = assignment.first;
                 assignWeights.insert(totalPoints, p) = assignment.second;
-                assignVecs.col(totalPoints) = baseCloud.segment<3>(p * 3);
                 ++totalPoints;
             }
         }
@@ -121,37 +124,54 @@ namespace ark {
     }
 
     void HumanAvatar::update() {
+        // BEGIN_PROFILE;
+
         /** Apply shape keys */
-        cloud.resize(3, numPoints());
-        Eigen::Map<Eigen::VectorXf> cloudVec(cloud.data(), cloud.cols() * 3);
-        cloudVec = keyClouds * w + baseCloud; 
+        Eigen::VectorXf shapedCloudVec = keyClouds * w + baseCloud; 
+        // PROFILE(ShapeKeys);
 
         /** Apply joint regressor */
-        CloudType jointPosInit = cloud * jointRegressor;
+        Eigen::Map<CloudType> shapedCloud(shapedCloudVec.data(), 3, jointRegressor.rows());
+        jointPos = shapedCloud * jointRegressor;
+        // PROFILE(JointRegr);
+
+        size_t j = 0;
+        for (int i = 0; i < jointRegressor.cols(); ++i) {
+            auto col = jointPos.col(i);
+            for (auto& assignment : assignedPoints[i]) {
+                int p = assignment.first;
+                assignVecs.col(j++).noalias() = shapedCloud.col(p) - col;
+            }
+        }
+
+        for (int i = jointRegressor.cols()-1; i >= 0; --i) {
+            jointPos.col(i).noalias() -= jointPos.col(parent[i]);
+        }
 
         /** Compute each joint's transform */
-        decltype(r) jointRots;
-        jointRots.reserve(jointRegressor.cols());
-        jointRots.push_back(r[0]);
-        jointPos.resize(3, jointPosInit.cols());
+        jointRot.clear();
+        jointRot.resize(jointRegressor.cols());
+        jointRot[0].noalias() = r[0];
+        // PROFILE(Alloc2);
 
-        /** Add root position to all joints */
-        jointPos.col(0) = p;
+        jointPos.col(0) = p; /** Add root position to all joints */
         for (size_t i = 1; i < jointRegressor.cols(); ++i) {
-            jointRots.push_back(jointRots[parent[i]] * r[i]);
-            jointPos.col(i) = jointRots[parent[i]] * (jointPosInit.col(i) -  jointPosInit.col(parent[i])) + jointPos.col(parent[i]);
+            jointRot[i].noalias() = jointRot[parent[i]] * r[i];
+            jointPos.col(i) = jointRot[parent[i]] * jointPos.col(i) + jointPos.col(parent[i]);
         }
+        // PROFILE(JointTransform);
 
         /** Compute each point's transform */
-        CloudType assignCloud(3, assignWeights.rows());
+        assignCloud.resize(3, assignWeights.rows());
         for (int i = 0; i < jointRegressor.cols(); ++i) {
             Eigen::Map<CloudType> block(assignCloud.data() + 3 * assignStarts[i], 3, assignStarts[i+1] - assignStarts[i]);
-            block = assignVecs.block(0, assignStarts[i], 3, assignStarts[i+1] - assignStarts[i]);
-            block.colwise() -= jointPosInit.col(i);
-            block = jointRots[i] * block;
+            block.noalias() = assignVecs.block(0, assignStarts[i], 3, assignStarts[i+1] - assignStarts[i]);
+            block = jointRot[i] * block;
             block.colwise() += jointPos.col(i);
         }
-        cloud = assignCloud * assignWeights;
+        // PROFILE(PointTransforms);
+        cloud.noalias() = assignCloud * assignWeights;
+        // PROFILE(UPDATE New);
     }
 
     Eigen::VectorXf HumanAvatar::smplParams() const {
