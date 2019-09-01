@@ -124,7 +124,7 @@ namespace ark {
     }
 
     void HumanAvatar::update() {
-        // BEGIN_PROFILE;
+        //BEGIN_PROFILE;
 
         /** Apply shape keys */
         Eigen::VectorXf shapedCloudVec = keyClouds * w + baseCloud; 
@@ -162,16 +162,14 @@ namespace ark {
         // PROFILE(JointTransform);
 
         /** Compute each point's transform */
-        assignCloud.resize(3, assignWeights.rows());
         for (int i = 0; i < jointRegressor.cols(); ++i) {
-            Eigen::Map<CloudType> block(assignCloud.data() + 3 * assignStarts[i], 3, assignStarts[i+1] - assignStarts[i]);
-            block.noalias() = assignVecs.block(0, assignStarts[i], 3, assignStarts[i+1] - assignStarts[i]);
+            Eigen::Map<CloudType> block(assignVecs.data() + 3 * assignStarts[i], 3, assignStarts[i+1] - assignStarts[i]);
             block = jointRot[i] * block;
             block.colwise() += jointPos.col(i);
         }
         // PROFILE(PointTransforms);
-        cloud.noalias() = assignCloud * assignWeights;
-        // PROFILE(UPDATE New);
+        cloud.noalias() = assignVecs * assignWeights;
+        //PROFILE(UPDATE New);
     }
 
     Eigen::VectorXf HumanAvatar::smplParams() const {

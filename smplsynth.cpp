@@ -9,8 +9,8 @@
 #include "opencv2/core.hpp"
 #include "opencv2/imgproc.hpp"
 #include "opencv2/highgui.hpp"
-#include <pcl/search/impl/search.hpp>
-#include <pcl/conversions.h>
+//#include <pcl/search/impl/search.hpp>
+//#include <pcl/conversions.h>
 #include <boost/lockfree/queue.hpp>
 #include <boost/program_options.hpp>
 #include <boost/filesystem.hpp>
@@ -370,7 +370,6 @@ void run(int num_threads, int num_to_gen, std::string out_path, const cv::Size& 
             ss_img_id << std::setw(8) << std::setfill('0') << std::to_string(i);
 
             randomizeParams(ava, posePrior);
-            ava.update();
             ava.update();
 
             const auto& modelCloud = ava.cloud;

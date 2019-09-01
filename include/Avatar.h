@@ -95,16 +95,13 @@ namespace ark {
          *  see assignStarts below. (num assignments total, num points) */
         Eigen::SparseMatrix<float> assignWeights;
 
-        /** Points for each assigned point (3, num assignments total) */
+        /** INTERNAL: Position of points relative to each assigned point (3, num assignments total) */
         CloudType assignVecs;
 
         /** Start index of each joint's assigned points
          *  as in cols of assignVecs and rows of assignWeights (num joints + 1);
          *  terminated with num assignments total */
         Eigen::VectorXi assignStarts;
-
-        /** Assigned cloud */
-        CloudType assignCloud;
 
         /** List of points assigned to each joint with weight*/
         std::vector<std::vector<std::pair<int, float> > > assignedPoints;
