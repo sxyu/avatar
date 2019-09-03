@@ -1,18 +1,26 @@
 #include "GaussianMixture.h"
 
 #include <Eigen/Core>
-#include <ceres/ceres.h>
+#include <Eigen/Dense>
 #include <fstream>
+#include <iostream>
+
+#include "Util.h"
 
 namespace ark {
     void GaussianMixture::load(const std::string & path)
     {
         std::ifstream ifs(path);
+        if (!ifs) {
+            std::cerr << "Warning: pose prior file at " << path << " does not exist or cannot be read\n";
+            nComps = -1;
+            return;
+        }
         ifs >> nComps >> nDims;
 
         // compute constants
-        float sqrt_2_pi_n = ceres::pow(2 * M_PI, nDims * 0.5 );
-        float log_sqrt_2_pi_n = nDims * 0.5 * std::log(2 * M_PI);
+        double sqrt_2_pi_n = std::pow(2 * M_PI, nDims * 0.5 );
+        double log_sqrt_2_pi_n = nDims * 0.5 * std::log(2 * M_PI);
         weight.resize(nComps);
         consts.resize(nComps);
         consts_log.resize(nComps);
@@ -32,12 +40,12 @@ namespace ark {
         }
 
         /** Cholesky decomposition */
-        typedef Eigen::LLT<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic>> Cholesky;
+        typedef Eigen::LLT<Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic>> Cholesky;
 
         cov.resize(nComps);
         cov_cho.resize(nComps);
         covi_cho.resize(nComps);
-        float maxDet = 0.0;
+        double maxDet = 0.0;
         for (int i = 0; i < nComps; ++i) {
             auto & m = cov[i];
             m.resize(nDims, nDims);
@@ -50,8 +58,8 @@ namespace ark {
             Cholesky chol(cov[i]);
             if (chol.info() != Eigen::Success) throw "Decomposition failed!";
             cov_cho[i] = chol.matrixL();
-            covi_cho[i] = chol.matrixL().solve(Eigen::MatrixXf::Identity(nDims, nDims)).transpose();
-            float det = covi_cho[i].determinant();
+            covi_cho[i] = chol.matrixL().solve(Eigen::MatrixXd::Identity(nDims, nDims)).transpose();
+            double det = covi_cho[i].determinant();
             maxDet = std::max(det, maxDet);
 
             // update constants
@@ -71,35 +79,51 @@ namespace ark {
     };
 
     /** Compute PDF at 'input' */
-    float GaussianMixture::pdf(const Eigen::Matrix<float, Eigen::Dynamic, 1> & x) const {
-        float prob(0.0);
-        typedef Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic> Mattype;
+    double GaussianMixture::pdf(const Eigen::VectorXd & x) const {
+        double prob(0.0);
+        typedef Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic> Mattype;
         for (int i = 0; i < nComps; ++i) {
-            Eigen::TriangularView<Eigen::MatrixXf, Eigen::Lower> L(covi_cho[i]);
+            Eigen::TriangularView<Eigen::MatrixXd, Eigen::Lower> L(covi_cho[i]);
             auto residual = (L.transpose() * (x - mean.row(i).transpose()));
-            prob += consts[i] * ceres::exp(-0.5 * residual.squaredNorm());
+            prob += consts[i] * std::exp(-0.5 * residual.squaredNorm());
         }
         return prob;
     }
 
-    Eigen::Matrix<float, Eigen::Dynamic, 1> GaussianMixture::residual(const Eigen::Matrix<float, Eigen::Dynamic, 1> & x) {
-        float bestProb = float(0);
-        typedef Eigen::Matrix<float, Eigen::Dynamic, 1> VecType;
-        typedef Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic> MatType;
-        VecType ans;
+    Eigen::VectorXd GaussianMixture::residual(const Eigen::VectorXd & x) const {
+        double bestProb = double(0);
+        Eigen::VectorXd ans;
         for (int i = 0; i < nComps; ++i) {
-            Eigen::TriangularView<Eigen::MatrixXf, Eigen::Lower> L(covi_cho[i]);
-            VecType residual(nDims + 1);
-            residual[nDims] = float(0);
+            Eigen::TriangularView<Eigen::MatrixXd, Eigen::Lower> L(covi_cho[i]);
+            Eigen::VectorXd residual(nDims + 1);
+            residual[nDims] = double(0);
             residual.head(nDims) = L.transpose() * (x - mean.row(i).transpose()) * sqrt(0.5);
-            float p = residual.squaredNorm() - float(consts_log[i]);
+            double p = residual.squaredNorm() - double(consts_log[i]);
             if (p < bestProb || !i) {
                 bestProb = p;
-                residual[nDims] = float(sqrt(-consts_log[i]));
+                residual[nDims] = double(sqrt(-consts_log[i]));
                 ans = residual;
             }
         }
         return ans;
+    }
+
+    Eigen::VectorXd GaussianMixture::sample() const {
+        // Pick random GMM component
+        double randf = random_util::uniform(0.0f, 1.0f);
+        int component;
+        for (size_t i = 0 ; i < nComps; ++i) {
+            randf -= weight[i];
+            if (randf <= 0) component = i;
+        }
+        Eigen::VectorXd r(nDims);
+        // Sample from Gaussian
+        for (int i = 0; i < nDims; ++i) {
+            r(i) = random_util::randn();
+        }
+        r *= cov_cho[component];
+        r += mean.row(component);
+        return r;
     }
 
 }  // namespace ark

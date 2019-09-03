@@ -1,22 +1,29 @@
+/** OpenARK Avatar Core functionality
+ *  SMPL is used but any model with similar data format will work
+ **/
 #pragma once
 #include "Version.h"
 #include <vector>
+#include <memory>
 #include <Eigen/Core>
 #include <Eigen/Dense>
 #include <Eigen/Sparse>
-#include <pcl/point_cloud.h>
-#include <pcl/point_types.h>
+#include <Eigen/StdVector>
+
+#include "GaussianMixture.h"
 
 namespace ark {
     class HumanDetector;
     struct HumanAvatarUKFModel;
 
-    typedef Eigen::Matrix<float, 3, Eigen::Dynamic> CloudType;
-    typedef Eigen::Matrix<float, 2, Eigen::Dynamic> Cloud2DType;
-    typedef Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic> MatrixType;
+    typedef Eigen::Matrix<double, 3, Eigen::Dynamic> CloudType;
+    typedef Eigen::Matrix<int, 3, Eigen::Dynamic> MeshType;
+    typedef Eigen::Matrix<double, 2, Eigen::Dynamic> Cloud2DType;
+    typedef Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic> MatrixType;
 
-    /** Names for the various skeletal joints in the SMPL model (does not work for other models) */
-    namespace SmplJointType {
+    /** Names for the various skeletal joints in the SMPL model (does not work for other models).
+     *  For reference only, the avatar will work for any model and does not use this. */
+    namespace SmplJoint {
         enum {
             // TODO: delegate to a skeleton instead
 
@@ -29,81 +36,132 @@ namespace ark {
         };
     }
 
-    /** Represents a generic humanoid avatar */
-    class HumanAvatar {
-    public:
+    /** Represents a generic avatar model, e.g.. SMPL.
+     *  This defines the pose/shape of an avatar and cannot be manipulated or viewed */
+    struct AvatarModel {
         /** Create an avatar from the model information in 'model_dir'
-         *  @param model_dir path to directory containing model files
+         *  @param model_dir path to directory containing model files,
+         *                   by default tries to find the one in OpenARK data directory.
+         *                   Must contain model point cloud (model.pcd),
+         *                   skeleton definition (skeleton.txt),
+         *                   and joint regressor (joint_regressor.txt);
+         *                   may also optionally have pose prior (pose_prior.txt),
+         *                   mesh as triangles (mesh.txt),
+         *                   and shape keys aka. blendshapes (shapekey/name.pcd).
+         *                   Joint 0 is expected to be root.
          */
-        explicit HumanAvatar(const std::string & model_dir);
-
-        /** Update the avatar's shape and pose */
-        void update();
+        explicit AvatarModel(const std::string & model_dir = "");
 
         /** Get number of joints */
         inline int numJoints() const { return jointRegressor.cols(); }
-
         /** Get number of skin points */
         inline int numPoints() const { return jointRegressor.rows(); }
-
         /** Get number of shape keys */
         inline int numShapeKeys() const { return keyClouds.cols(); }
+        /** Get number of polygon faces */
+        inline int numFaces() const { return mesh.cols(); }
+        /** Get whether a mesh is available */
+        inline bool hasMesh() const { return mesh.cols() > 0; }
+        /** Get whether the pose prior model is available */
+        inline bool hasPosePrior() const { return posePrior.nComps >= 0; }
 
-        /** Compute the avatar's SMPL pose parameters (Rodrigues angles) */
-        Eigen::VectorXf smplParams() const;
+        /** Mesh: contains triplets of point indices representing faces (3, num faces) */
+        MeshType mesh;
 
-        /** Get PCL point cloud of Avatar's points */
-        pcl::PointCloud<pcl::PointXYZ>::Ptr getCloud() const;
+        /** Parent joint index of each joint */
+        Eigen::VectorXi parent;
 
-        /** Shape-key (aka. blend shape) weights */
-        Eigen::VectorXf w;
+        /** Assigned weight joint index with greatest for each point, sorted by descending weight,
+         *  used for part mask (num points) */
+        std::vector<std::vector<std::pair<double, int> > > assignedJoints;
 
-        /** Root position */
-        Eigen::Vector3f p;
+        /** List of points assigned to each joint with weight */
+        std::vector<std::vector<std::pair<double, int> > > assignedPoints;
 
-        /** The rotations, stored as 3x3 rotation matrices */
-        std::vector<Eigen::Matrix3f> r;
+        /** Gaussian Mixture pose prior */
+        GaussianMixture posePrior;
+
+        // Advanced data members, for advanced users only
+        /** ADVANCED: Base point cloud with positions of each skin point from data file, as a vector (3 * num points).
+         *  This is kept as a vector to make it easier to add keyClouds which otherwise needs to be a 3D tensor. */
+        Eigen::VectorXd baseCloud;
+
+        /** ADVANCED: Shape key (blendshape) data (3*num points, num keys),
+         *  each column is vectorized matrix of points x1 y1 z1 x2 y2 z2 ... */
+        MatrixType keyClouds;
+
+        /** ADVANCED: Joint regressor for recovering joint positions from surface points (num points, num joints) */
+        Eigen::SparseMatrix<double> jointRegressor;
+
+        /** ADVANCED: Assignment weights: weights for point-joints assignments.
+         *  Columns are recorded in 'assignment' indices,
+         *  see assignStarts below. (num assignments total, num points) */
+        Eigen::SparseMatrix<double> assignWeights;
+
+        /** ADVANCED: Start index of each joint's assigned points
+         *  as in rows of assignWeights (num joints + 1);
+         *  terminated with num assignments total */
+        Eigen::VectorXi assignStarts;
+
+        /** The directory the avatar's model was imported from */
+        const std::string MODEL_DIR;
+    };
+
+    /** Represents a generic avatar instance. The user should construct an AvatarModel first and
+     *  pass it to HumanAvatar. */
+    class Avatar {
+    public:
+        /** Create an avatar by constructing AvatarModel from the model
+         *  @see AvatarModel
+         */
+        explicit Avatar(const AvatarModel& model);
+
+        /** Update the avatar's joints and skin points based on current shape and pose parameters.
+         *  Must be called at least once after initializing the avatar.
+         *  WARNING: this is relatively expensive, so don't call it until you really need
+         *  to get the joints/points of the avatar (updating takes 0.3-0.6 ms typically)
+         */
+        void update();
+
+        /** Randomize avatar's pose and shape according to PCA (shape) and GMM model (pose). */
+        void randomize();
+
+
+        /** Compute the avatar's SMPL pose parameters (axis-angle) */
+        Eigen::VectorXd smplParams() const;
+
+        /** Get GMM pdf (likelihood) for current joint rotation parameters */
+        double pdf() const;
+
+        /** The avatar model */
+        const AvatarModel& model;
 
         /** Current point cloud with pose and shape keys both applied (3, num points) */
         CloudType cloud;
+
+        /** Shape-key (aka. blend shape) weights */
+        Eigen::VectorXd w;
+
+        /** Root position */
+        Eigen::Vector3d p;
+
+        using Mat3Alloc = Eigen::aligned_allocator<Eigen::Matrix3d>; // Alligned matrix allocator
+
+        /** The rotations, stored as 3x3 rotation matrices */
+        std::vector<Eigen::Matrix3d, Mat3Alloc> r;
 
         /** Current joint positions (3, num joints) */
         CloudType jointPos;
 
         /** Current joint rotations */
-        std::vector<Eigen::Matrix3f> jointRot;
-
-        /** Parent joint index of each joint */
-        Eigen::VectorXi parent;
-
-        /** The directory the avatar's model was imported from */
-        const std::string MODEL_DIR;
+        std::vector<Eigen::Matrix3d, Mat3Alloc> jointRot;
 
     private:
-        /** Base point cloud with positions of each skin point from data file (3 * num points) */
-        Eigen::VectorXf baseCloud;
 
-        /** Shape key (blendshape) data (3*num points, num keys),
-         *  each column is vectorized matrix of points x1 y1 z1 x2 y2 z2 ... */
-        MatrixType keyClouds;
+        /** INTERNAL for caching use: baseCloud after applying shape keys (3 * num points) */
+        Eigen::VectorXd shapedCloudVec;
 
-        /** Joint regressor (num points, num joints) */
-        Eigen::SparseMatrix<float> jointRegressor;
-
-        /** Assignment weights: weights for point-joints assignments.
-         *  Columns are recorded in 'assignment' indices,
-         *  see assignStarts below. (num assignments total, num points) */
-        Eigen::SparseMatrix<float> assignWeights;
-
-        /** INTERNAL: Position of points relative to each assigned point (3, num assignments total) */
+        /** INTERNAL for caching use: Position of points relative to each assigned point (3, num assignments total) */
         CloudType assignVecs;
-
-        /** Start index of each joint's assigned points
-         *  as in cols of assignVecs and rows of assignWeights (num joints + 1);
-         *  terminated with num assignments total */
-        Eigen::VectorXi assignStarts;
-
-        /** List of points assigned to each joint with weight*/
-        std::vector<std::vector<std::pair<int, float> > > assignedPoints;
     };
 }

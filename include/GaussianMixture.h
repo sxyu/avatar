@@ -13,10 +13,13 @@ namespace ark {
         int numComponents() const;
 
         /** Compute PDF at 'input' */
-        float pdf(const Eigen::Matrix<float, Eigen::Dynamic, 1> & x) const;
+        double pdf(const Eigen::VectorXd & x) const;
 
         /** Compute Ceres residual vector (squaredNorm of output vector is equal to min_i -log(c_i pdf_i(x))) */
-        Eigen::Matrix<float, Eigen::Dynamic, 1> residual(const Eigen::Matrix<float, Eigen::Dynamic, 1> & x);
+        Eigen::VectorXd residual(const Eigen::VectorXd & x) const;
+
+        /** Get a random sample from this distribution */
+        Eigen::VectorXd sample() const;
 
         /** Number of GMM components */
         int nComps;
@@ -25,19 +28,19 @@ namespace ark {
         int nDims;
 
         /** Weight of each GMM component */
-        Eigen::VectorXf weight;
+        Eigen::VectorXd weight;
 
         /** Mean of each GMM component */
-        Eigen::MatrixXf mean;
+        Eigen::MatrixXd mean;
 
         /** Covariance of each GMM component */
-        std::vector<Eigen::MatrixXf> cov;
+        std::vector<Eigen::MatrixXd> cov;
 
         // leading constants
         Eigen::VectorXd consts, consts_log;
         // cholesky decomposition of cov: cov = cov_cho * cov_cho^T
-        std::vector<Eigen::MatrixXf> cov_cho;
+        std::vector<Eigen::MatrixXd> cov_cho;
         // cholesky decomposition of inverse: cov^-1 = covi_cho * covi_cho^T
-        mutable std::vector<Eigen::MatrixXf> covi_cho;
+        mutable std::vector<Eigen::MatrixXd> covi_cho;
     };
 }  // namespace ark

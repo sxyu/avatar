@@ -4,7 +4,7 @@
 
 namespace ark {
 // Parts to use for labelling
-namespace PartMap {
+namespace part_map {
     enum {
         PELVIS = 0, L_THIGH, R_THIGH, ABDOMEN, L_SHIN, R_SHIN,
         CHEST,

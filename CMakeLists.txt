@@ -5,6 +5,8 @@ if(NOT CMAKE_BUILD_TYPE)
 endif()
 
 project( smplsynth )
+option( OPENARK_FFAST_MATH "OPENARK_FFAST_MATH" ON )
+
 set( INCLUDE_DIR "${PROJECT_SOURCE_DIR}/include" )
 
 set( CMAKE_CXX_STACK_SIZE "10000000" )
@@ -21,7 +23,9 @@ if( NOT CMAKE_BUILD_TYPE )
 endif()
 
 set( PROJ_NAME "smplsynth" )
-set( PART_LABELS_NAME "partlabels" )
+set( LIB_NAME "libsmplsynth" )
+set( SYNTH_NAME "smplsynth" )
+set( OPTIM_NAME "optim" )
 set( OUTPUT_NAME "smplsynth" )
 
 include( CheckCXXCompilerFlag )
@@ -36,8 +40,15 @@ else()
     message( STATUS "The compiler ${CMAKE_CXX_COMPILER} has no C++11 support. Please use a different C++ compiler." )
 endif()
 
-if ( CMAKE_COMPILER_IS_GNUCXX )
-    set( CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-deprecated -Wno-deprecated-declarations -O3 -g" )
+if ( CMAKE_COMPILER_IS_GNUCXX OR (CMAKE_CXX_COMPILER_ID MATCHES "Clang") )
+    set( CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-deprecated -Wno-deprecated-declarations -O3 -funroll-loops -g" )
+    if( ${OPENARK_FFAST_MATH} )
+        set( CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -ffast-math" )
+    endif()
+elseif( MSVC )
+    if( ${OPENARK_FFAST_MATH} )
+        set( CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /fp:fast" )
+    endif()
 endif ( CMAKE_COMPILER_IS_GNUCXX )
 
 set( Boost_USE_STATIC_LIBS ON )
@@ -101,6 +112,7 @@ set(
 set(
   SOURCES
   Avatar.cpp 
+  AvatarOptimizer.cpp 
   Calibration.cpp 
   GaussianMixture.cpp 
   Util.cpp 
@@ -109,11 +121,15 @@ set(
 set(
   HEADERS
   ${INCLUDE_DIR}/Avatar.h
+  ${INCLUDE_DIR}/AvatarPCL.h
+  ${INCLUDE_DIR}/AvatarRenderer.h
+  ${INCLUDE_DIR}/AvatarOptimizer.h
   ${INCLUDE_DIR}/Calibration.h
   ${INCLUDE_DIR}/Config.h
   ${INCLUDE_DIR}/GaussianMixture.h
   ${INCLUDE_DIR}/Util.h
   ${INCLUDE_DIR}/Version.h
+  ${INCLUDE_DIR}/nanoflann.hpp
 )
 
 add_definitions(
@@ -123,18 +139,27 @@ foreach( DEFINITION ${PCL_DEFINITIONS} )
   set( TARGET_COMPILE_FLAGS "${TARGET_COMPILE_FLAGS} ${DEFINITION}" )
 endforeach()
 
-add_executable( ${PROJ_NAME} ${SOURCES} ${HEADERS} smplsynth.cpp )
-target_include_directories( ${PROJ_NAME} PRIVATE ${INCLUDE_DIR} )
-set_target_properties( ${PROJ_NAME} PROPERTIES OUTPUT_NAME ${OUTPUT_NAME} )
-target_link_libraries( ${PROJ_NAME} ${DEPENDENCIES} )
-set_target_properties( ${PROJ_NAME} PROPERTIES COMPILE_FLAGS ${TARGET_COMPILE_FLAGS} )
+add_library( ${LIB_NAME} STATIC ${SOURCES} ${HEADERS} )
+set_target_properties( ${LIB_NAME} PROPERTIES OUTPUT_NAME ${OUTPUT_NAME} )
+target_link_libraries( ${LIB_NAME} ${DEPENDENCIES} )
+set_target_properties( ${LIB_NAME} PROPERTIES COMPILE_FLAGS ${TARGET_COMPILE_FLAGS} )
 
-add_executable( ${PART_LABELS_NAME} ${SOURCES} ${HEADERS} partlabels.cpp )
-target_include_directories( ${PART_LABELS_NAME} PRIVATE ${INCLUDE_DIR} )
-set_target_properties( ${PART_LABELS_NAME} PROPERTIES OUTPUT_NAME ${PART_LABELS_NAME} )
-target_link_libraries( ${PART_LABELS_NAME} ${DEPENDENCIES} )
-set_target_properties( ${PART_LABELS_NAME} PROPERTIES COMPILE_FLAGS ${TARGET_COMPILE_FLAGS} )
-  
+add_executable( ${SYNTH_NAME} smplsynth.cpp )
+target_include_directories( ${SYNTH_NAME} PRIVATE ${INCLUDE_DIR} )
+set_target_properties( ${SYNTH_NAME} PROPERTIES OUTPUT_NAME ${OUTPUT_NAME} )
+target_link_libraries( ${SYNTH_NAME} ${DEPENDENCIES} ${LIB_NAME} )
+set_target_properties( ${SYNTH_NAME} PROPERTIES COMPILE_FLAGS ${TARGET_COMPILE_FLAGS} )
+
+add_executable( ${OPTIM_NAME} optim.cpp )
+target_include_directories( ${OPTIM_NAME} PRIVATE ${INCLUDE_DIR} )
+target_link_libraries( ${OPTIM_NAME} ${DEPENDENCIES} ${LIB_NAME} )
+set_target_properties( ${OPTIM_NAME} PROPERTIES COMPILE_FLAGS ${TARGET_COMPILE_FLAGS} )
+
+add_executable( scratch scratch.cpp )
+target_include_directories( scratch PRIVATE ${INCLUDE_DIR} )
+target_link_libraries( scratch ${DEPENDENCIES} ${LIB_NAME} )
+set_target_properties( scratch PROPERTIES COMPILE_FLAGS ${TARGET_COMPILE_FLAGS} )
+
 if ( MSVC )
     set_property(TARGET ${PROJ_NAME} APPEND PROPERTY LINK_FLAGS /DEBUG)
 else ()
