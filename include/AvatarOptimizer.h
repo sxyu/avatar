@@ -19,7 +19,7 @@ namespace ark {
         /** Rotation representation size */
         static const int ROT_SIZE = 4;
 
-        /** Optimization parameter r */
-        std::vector<Eigen::Quaterniond, Eigen::aligned_allocator<Eigen::Quaterniond> > r;
+        /** Optimization rotation parameters (quaternions: 4*num joints) */
+        Eigen::VectorXd r;
     };
 }
