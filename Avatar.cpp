@@ -473,7 +473,7 @@ namespace ark {
         for (int i = 1; i < model.numJoints(); ++i) {
             Eigen::AngleAxisd aa;
             aa.fromRotationMatrix(r[i]);
-            res = aa.axis() * aa.angle();
+            res.segment<3>((i-1) * 3) = aa.axis() * aa.angle();
         }
         return res;
     }

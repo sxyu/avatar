@@ -1,6 +1,7 @@
 #pragma once
 #include <string>
 #include <Eigen/Core>
+#include <Eigen/StdVector>
 #include <vector>
 
 namespace ark {
@@ -15,8 +16,11 @@ namespace ark {
         /** Compute PDF at 'input' */
         double pdf(const Eigen::VectorXd & x) const;
 
-        /** Compute Ceres residual vector (squaredNorm of output vector is equal to min_i -log(c_i pdf_i(x))) */
-        Eigen::VectorXd residual(const Eigen::VectorXd & x) const;
+        /** Compute Ceres residual vector. As in SMPLify, we use negative log likelihood and
+         *  approximate the summation with min.
+         *  (squaredNorm of output vector is equal to min_i -log(c_i pdf_i(x)));
+         *  @param comp_idx optionally, outputs index of most significant component into this pointer */
+        Eigen::VectorXd residual(const Eigen::VectorXd & x, int* comp_idx = nullptr) const;
 
         /** Get a random sample from this distribution */
         Eigen::VectorXd sample() const;
@@ -31,7 +35,7 @@ namespace ark {
         Eigen::VectorXd weight;
 
         /** Mean of each GMM component */
-        Eigen::MatrixXd mean;
+        Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor> mean;
 
         /** Covariance of each GMM component */
         std::vector<Eigen::MatrixXd> cov;
@@ -39,8 +43,8 @@ namespace ark {
         // leading constants
         Eigen::VectorXd consts, consts_log;
         // cholesky decomposition of cov: cov = cov_cho * cov_cho^T
-        std::vector<Eigen::MatrixXd> cov_cho;
-        // cholesky decomposition of inverse: cov^-1 = covi_cho * covi_cho^T
-        mutable std::vector<Eigen::MatrixXd> covi_cho;
+        mutable std::vector<Eigen::MatrixXd, Eigen::aligned_allocator<Eigen::Matrix3d> > cov_cho;
+        // cholesky decomposition of inverse: cov^-1 = prec_cho * covi_cho^T
+        mutable std::vector<Eigen::MatrixXd, Eigen::aligned_allocator<Eigen::Matrix3d> > prec_cho;
     };
 }  // namespace ark
