@@ -132,7 +132,7 @@ int main(int argc, char** argv) {
         double phi   = random_util::uniform(-M_PI/2, M_PI/2);
         Eigen::Vector3d axis_perturb;
         fromSpherical(1.0, theta, phi, axis_perturb);
-        double angle_perturb = random_util::randn(0.0, 0.2);
+        double angle_perturb = random_util::randn(0.0, 0.1);
         Eigen::AngleAxisd aa_perturb(angle_perturb, axis_perturb);
         ava2.r[i] *= aa_perturb.toRotationMatrix();
     }
