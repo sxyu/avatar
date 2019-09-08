@@ -119,8 +119,26 @@ int main(int argc, char** argv) {
     }
 
     Avatar ava2(model);
+    ava2.r = ava.r;
+
+    auto fromSpherical = [](double rho, double theta,
+                        double phi, Eigen::Vector3d& out) {
+        out[0] = rho * sin(phi) * cos(theta);
+        out[1] = rho * cos(phi);
+        out[2] = rho * sin(phi) * sin(theta);
+    };
+    for (int i = 0; i < ava.model.numJoints(); ++i) {
+        double theta = random_util::uniform(0, 2 * M_PI);
+        double phi   = random_util::uniform(-M_PI/2, M_PI/2);
+        Eigen::Vector3d axis_perturb;
+        fromSpherical(1.0, theta, phi, axis_perturb);
+        double angle_perturb = random_util::randn(0.0, 0.2);
+        Eigen::AngleAxisd aa_perturb(angle_perturb, axis_perturb);
+        ava2.r[i] *= aa_perturb.toRotationMatrix();
+    }
     ava2.p = ava.p;
-    ava2.r[0] = Eigen::AngleAxisd(M_PI, Eigen::Vector3d(0.,1.,0.));
+    ava2.w.setZero();
+    //ava2.r[0] = Eigen::AngleAxisd(M_PI, Eigen::Vector3d(0.,1.,0.));
     //ava2.r[ark::SmplJoint::R_SHOULDER] = Eigen::AngleAxisd(M_PI/6, Eigen::Vector3d(0.,1.,0.));
     ava2.update();
 

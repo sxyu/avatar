@@ -563,7 +563,7 @@ namespace ark {
         };
 
         void findNN(const CloudType & dataCloud, const CloudType & modelCloud,
-            std::vector<std::vector<int> > & correspondences, bool invert = true) {
+            std::vector<std::vector<int> > & correspondences, bool invert = false) {
 
             if (invert) {
                 size_t index; double dist;
@@ -598,7 +598,7 @@ namespace ark {
             } else {
                 size_t index; double dist;
                 nanoflann::KNNResultSet<double> resultSet(1);
-                // match each data point to a model point
+                // match each model point to a data point
                 typedef nanoflann::KDTreeEigenColMajorMatrixAdaptor<
                     CloudType, 3, nanoflann::metric_L2_Simple> KdTree;
                 KdTree kd(dataCloud, 10);
@@ -699,7 +699,6 @@ namespace ark {
             }
             */
 
-
             for (size_t i = 0; i < correspondences.size(); ++i) {
                 for (size_t j = 0; j < correspondences[i].size(); ++j) {
                     if (random_util::uniform(0.0, 1.0) > 0.05) continue;
@@ -711,7 +710,6 @@ namespace ark {
                 }
             }
 
-            viewer->addCoordinateSystem(1.0);
             viewer->spin();
         }
 
@@ -922,7 +920,7 @@ namespace ark {
             options.trust_region_strategy_type = ceres::DOGLEG;
             //options.preconditioner_type = ceres::PreconditionerType::CLUSTER_JACOBI;
             //options.dogleg_type = ceres::DoglegType::SUBSPACE_DOGLEG;
-            options.initial_trust_region_radius = 1e4;
+            options.initial_trust_region_radius = 1e2;
             options.minimizer_progress_to_stdout = false;
             options.logging_type = ceres::LoggingType::SILENT;//PER_MINIMIZER_ITERATION;
             options.minimizer_type = ceres::TRUST_REGION;
