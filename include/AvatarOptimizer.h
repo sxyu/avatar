@@ -21,5 +21,8 @@ namespace ark {
 
         /** Optimization parameter r */
         std::vector<Eigen::Quaterniond, Eigen::aligned_allocator<Eigen::Quaterniond> > r;
+
+        /** Cost function component weights */
+        double betaPose = 0.1, betaShape = 0.1, betaJoints = 0.2;
     };
 }

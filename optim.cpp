@@ -20,6 +20,7 @@ int main(int argc, char** argv) {
 
     std::string intrinPath;
     int numThreads, iters;
+    double betaPose;
     cv::Size size;
 
     po::options_description desc("Option arguments");
@@ -29,6 +30,7 @@ int main(int argc, char** argv) {
         ("help", "produce help message")
         (",j", po::value<int>(&numThreads)->default_value(boost::thread::hardware_concurrency()), "Number of threads")
         (",i", po::value<int>(&iters)->default_value(2), "Number of iterations to run")
+        ("betapose", po::value<double>(&betaPose)->default_value(0.1), "Cost function weight betaPose")
     ;
 
     descPositional.add_options()
@@ -76,9 +78,11 @@ int main(int argc, char** argv) {
     pos.x() = 0.0;//random_util::uniform(-1.0, 1.0);
     pos.y() = 0.0;//random_util::uniform(-0.5, 0.5);
     pos.z() = 3.2;random_util::uniform(2.2, 4.5);
-    ava.r[0] = Eigen::AngleAxisd(M_PI, Eigen::Vector3d(0.,1.,0.));
-    ava.r[ark::SmplJoint::R_SHOULDER] = Eigen::AngleAxisd(M_PI/6, Eigen::Vector3d(0.,1.,0.));
+    ava.randomize();
+    //ava.r[0] = Eigen::AngleAxisd(M_PI, Eigen::Vector3d(0.,1.,0.));
+    //ava.r[ark::SmplJoint::R_SHOULDER] = Eigen::AngleAxisd(M_PI/6, Eigen::Vector3d(0.,1.,0.));
     ava.p = pos;
+    ava.w.setZero();
 
     ava.update();
 
@@ -121,6 +125,7 @@ int main(int argc, char** argv) {
     ava2.update();
 
     AvatarOptimizer optim(ava2);
+    optim.betaPose = betaPose;
     optim.optimize(dataCloud, iters);
 
     ava2.update();

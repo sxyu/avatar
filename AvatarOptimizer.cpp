@@ -482,8 +482,6 @@ namespace ark {
             AvatarEvaluationCommonData<AvatarICPCostFunctorCache>& commonData;
         };
 
-        const double betaPose = 0.2;
-
         /** Ceres analytic derivative cost function for pose prior error */
         struct AvatarPosePriorCostFunctor : ceres::CostFunction {
             AvatarPosePriorCostFunctor(AvatarEvaluationCommonData<AvatarICPCostFunctorCache> & common_data)
@@ -508,7 +506,7 @@ namespace ark {
                 }
                 Eigen::Map<Eigen::VectorXd> resid(residuals, nResids);
                 int compIdx;
-                resid.noalias() = posePrior.residual(smplParams, &compIdx) * betaPose;
+                resid.noalias() = posePrior.residual(smplParams, &compIdx) * commonData.opt.betaPose;
                 if (jacobians != nullptr) {
                     const Eigen::MatrixXd& L = posePrior.prec_cho[compIdx];
                     // precision = L L^T
@@ -516,7 +514,7 @@ namespace ark {
                         if (jacobians[i] != nullptr) {
                             Eigen::Map<Eigen::Matrix<double, Eigen::Dynamic, 4, Eigen::RowMajor> > J(jacobians[i], nResids, 4);
                             J.topLeftCorner<Eigen::Dynamic, 3>(nResids - 1, 3).noalias() = L.block<3, Eigen::Dynamic>(i * 3, 0, 3, nResids - 1).transpose() *
-                                                                                               sqrt(0.5) * betaPose;
+                                                                                               sqrt(0.5) * commonData.opt.betaPose;
                             J.rightCols<1>().setZero();
                             J.bottomLeftCorner<1, 3>().setZero();
                         }
@@ -911,7 +909,9 @@ namespace ark {
             for (int i = 1; i < ava.model.numJoints(); ++i) {
                 posePriorParams.push_back(r[i].coeffs().data());
             }
-            problem.AddResidualBlock(new AvatarPosePriorCostFunctor(common), NULL, posePriorParams);
+            if (betaPose > 0.) {
+                problem.AddResidualBlock(new AvatarPosePriorCostFunctor(common), NULL, posePriorParams);
+            }
 
             debugVisualize(viewer, data_cloud, correspondences, common);
             std::cerr << "Residuals: " << residualsCnt << " Avg params: " << static_cast<double>(avgParams) / pointsCnt << "\n";
@@ -931,7 +931,7 @@ namespace ark {
             //options.max_linear_solver_iterations = num_subiter;
             options.max_num_iterations = 4;
             options.num_threads = common.numThreads;
-            options.function_tolerance = 1e-5;
+            options.function_tolerance = 1e-4;
             options.evaluation_callback = &common;
 
             // Run solver
