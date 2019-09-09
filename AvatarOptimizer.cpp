@@ -218,34 +218,34 @@ namespace ark {
                             // Fill the derivatives of the local to parent local
                             // rotation matrix
                             q.coeffs() *= 2;
-                            // Using rotation matrix from Terzakis et al.
-                            // L(i, 3) <<  q.w(), -q.z(),  q.y(),
-                            //             q.z(),  q.w(), -q.x(),
-                            //            -q.y(),  q.x(),  q.w();
-                            // L(i, 0) <<  q.x(),  q.y(),  q.z(),
-                            //             q.y(), -q.x(), -q.w(),
-                            //             q.z(),  q.w(), -q.x();
-                            // L(i, 1) << -q.y(),  q.x(),  q.w(),
-                            //             q.x(),  q.y(),  q.z(),
-                            //            -q.w(),  q.z(), -q.y();
-                            // L(i, 2) << -q.z(), -q.w(),  q.x(),
-                            //             q.w(), -q.z(),  q.y(),
-                            //             q.x(),  q.y(),  q.y();
+                            // Rotation matrix derivative
+                            L(i, 3) <<  q.w(), -q.z(),  q.y(),
+                                        q.z(),  q.w(), -q.x(),
+                                       -q.y(),  q.x(),  q.w();
+                            L(i, 0) <<  q.x(),  q.y(),  q.z(),
+                                        q.y(), -q.x(), -q.w(),
+                                        q.z(),  q.w(), -q.x();
+                            L(i, 1) << -q.y(),  q.x(),  q.w(),
+                                        q.x(),  q.y(),  q.z(),
+                                       -q.w(),  q.z(), -q.y();
+                            L(i, 2) << -q.z(), -q.w(),  q.x(),
+                                        q.w(), -q.z(),  q.y(),
+                                        q.x(),  q.y(),  q.z();
                             
-                            // Using Eigen's toRotationMatrix
-                            double tqx = -2.*q.x(), tqy = -2.*q.y(), tqz = -2.*q.z();
-                            L(i, 3) <<     0., -q.z(),  q.y(),
-                                        q.z(),     0., -q.x(),
-                                       -q.y(),  q.x(),     0.;
-                            L(i, 0) <<     0.,  q.y(),  q.z(),
-                                        q.y(),    tqx, -q.w(),
-                                        q.z(),  q.w(),    tqx;
-                            L(i, 1) <<    tqy,  q.x(),  q.w(),
-                                        q.x(),     0.,  q.z(),
-                                       -q.w(),  q.z(),    tqy;
-                            L(i, 2) <<    tqz, -q.w(),  q.x(),
-                                        q.w(),    tqz,  q.y(),
-                                        q.x(),  q.y(),     0.;
+                            // Using Eigen's toRotationMatrix (basically same, not useful)
+                            // double tqx = -2.*q.x(), tqy = -2.*q.y(), tqz = -2.*q.z();
+                            // L(i, 3) <<     0., -q.z(),  q.y(),
+                            //             q.z(),     0., -q.x(),
+                            //            -q.y(),  q.x(),     0.;
+                            // L(i, 0) <<     0.,  q.y(),  q.z(),
+                            //             q.y(),    tqx, -q.w(),
+                            //             q.z(),  q.w(),    tqx;
+                            // L(i, 1) <<    tqy,  q.x(),  q.w(),
+                            //             q.x(),     0.,  q.z(),
+                            //            -q.w(),  q.z(),    tqy;
+                            // L(i, 2) <<    tqz, -q.w(),  q.x(),
+                            //             q.w(),    tqz,  q.y(),
+                            //             q.x(),  q.y(),     0.;
 
                             /** Left-multiply by joint's global rotation */
                             L(i, 0) = R(-1, p) * L(i, 0);
