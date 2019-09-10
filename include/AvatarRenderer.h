@@ -43,7 +43,17 @@ namespace ark {
          **/
         cv::Mat renderPartMask(const cv::Size& image_size, const int* part_map = nullptr) const;
 
-        /** Clear all cache */
+        /** Render avatar faces given image size
+         *  Faces is a CV_32S image where pixels assigned to each face has colors 0, 1, ...
+         *  Faces are indexed in the order from getOrderedFaces
+         *  Background pixels have value -1.
+         *  Assumes camera is at 0,0,0 and looking in positive z direction
+         **/
+        cv::Mat renderFaces(const cv::Size& image_size) const;
+
+        /** Clear all caches. You must call this whenever avatar parameters change.
+         *  Note: this only changes internal cache state and is thus considered a
+         *  'const' function in line with other renderer functions */
         void update() const;
 
     private:

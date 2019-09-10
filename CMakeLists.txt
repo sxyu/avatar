@@ -116,6 +116,7 @@ set(
   Calibration.cpp 
   GaussianMixture.cpp 
   Util.cpp 
+  ViconSkeleton.cpp 
 )
 
 set(
@@ -129,6 +130,7 @@ set(
   ${INCLUDE_DIR}/GaussianMixture.h
   ${INCLUDE_DIR}/Util.h
   ${INCLUDE_DIR}/Version.h
+  ${INCLUDE_DIR}/ViconSkeleton.h
   ${INCLUDE_DIR}/nanoflann.hpp
 )
 

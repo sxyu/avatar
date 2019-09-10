@@ -11,7 +11,14 @@
 #include "AvatarPCL.h"
 
 #include "Avatar.h"
+#include "AvatarRenderer.h"
 #include "Util.h"
+
+#define BEGIN_PROFILE auto start = std::chrono::high_resolution_clock::now()
+#define PROFILE(x) do{printf("%s: %f ms\n", #x, std::chrono::duration<double, std::milli>(std::chrono::high_resolution_clock::now() - start).count()); start = std::chrono::high_resolution_clock::now(); }while(false)
+
+// Uncomment below line to compare analytic diff results to auto diff
+//#define TEST_COMPARE_AUTO_DIFF
 
 namespace nanoflann {
     /// KD-tree adaptor for working with data directly stored in a column-major Eigen Matrix, without duplicating the data storage.
@@ -193,126 +200,42 @@ namespace ark {
 
                     for (int i = 0; i < nJoints - 1; ++i) {
                         // double * jacobian = localJacobian[i].data();
-                        double * x = opt.r[i].coeffs().data();
-                        localJacobian[i] << x[3],  x[2], -x[1],
-                                           -x[2],  x[3],  x[0],
-                                            x[1], -x[0],  x[3],
-                                           -x[0], -x[1], -x[2];
+                        auto& x = opt.r[i].coeffs();
+                        localJacobian[i] << x(3),  x(2), -x(1),
+                                           -x(2),  x(3),  x(0),
+                                            x(1), -x(0),  x(3),
+                                           -x(0), -x(1), -x(2);
                     }
 
                     R(-1, -1).setIdentity(); // -1 means 'to global'
-                    t(-1, -1).setZero();//.noalias() = ava.p;
+                    t(-1, -1).setZero();
                     for (int i = 0; i < nJoints - 1; ++i) {
                         R(i, i).setIdentity();
                         Eigen::Matrix3d rot = opt.r[i].toRotationMatrix();
-                        t(i, i).setZero(); //.noalias() = jointVecInit.col(i);
+                        t(i, i).setZero();
                         int p = ava.model.parent[i];
                         for (int j = p; ; j = ava.model.parent[j]) {
                             R(j, i).noalias() = R(j, p) * rot;
                             t(j, i).noalias() = R(j, p) * jointVecInit.col(i) + t(j, p);
                             if (j == -1) break;
                         }
-
-<<<<<<< HEAD
-                        if (evaluate_jacobians) {
-                            // Fill the derivatives of the local to parent local
-                            // rotation matrix
-                            q.coeffs() *= 2;
-                            // Rotation matrix derivative
-                            L(i, 3) <<  q.w(), -q.z(),  q.y(),
-                                        q.z(),  q.w(), -q.x(),
-                                       -q.y(),  q.x(),  q.w();
-                            L(i, 0) <<  q.x(),  q.y(),  q.z(),
-                                        q.y(), -q.x(), -q.w(),
-                                        q.z(),  q.w(), -q.x();
-                            L(i, 1) << -q.y(),  q.x(),  q.w(),
-                                        q.x(),  q.y(),  q.z(),
-                                       -q.w(),  q.z(), -q.y();
-                            L(i, 2) << -q.z(), -q.w(),  q.x(),
-                                        q.w(), -q.z(),  q.y(),
-                                        q.x(),  q.y(),  q.z();
-                            
-                            // Using Eigen's toRotationMatrix (basically same, not useful)
-                            // double tqx = -2.*q.x(), tqy = -2.*q.y(), tqz = -2.*q.z();
-                            // L(i, 3) <<     0., -q.z(),  q.y(),
-                            //             q.z(),     0., -q.x(),
-                            //            -q.y(),  q.x(),     0.;
-                            // L(i, 0) <<     0.,  q.y(),  q.z(),
-                            //             q.y(),    tqx, -q.w(),
-                            //             q.z(),  q.w(),    tqx;
-                            // L(i, 1) <<    tqy,  q.x(),  q.w(),
-                            //             q.x(),     0.,  q.z(),
-                            //            -q.w(),  q.z(),    tqy;
-                            // L(i, 2) <<    tqz, -q.w(),  q.x(),
-                            //             q.w(),    tqz,  q.y(),
-                            //             q.x(),  q.y(),     0.;
-
-                            /** Left-multiply by joint's global rotation */
-                            L(i, 0) = R(-1, p) * L(i, 0);
-                            L(i, 1) = R(-1, p) * L(i, 1);
-                            L(i, 2) = R(-1, p) * L(i, 2);
-                            L(i, 3) = R(-1, p) * L(i, 3);
-                        }
-=======
-                        // if (evaluate_jacobians) {
-                        //     // Fill the derivatives of the local to parent local
-                        //     // rotation matrix
-                        //     q.coeffs() *= 2;
-                        //     // Using rotation matrix from Terzakis et al.
-                        //     // L(i, 3) <<  q.w(), -q.z(),  q.y(),
-                        //     //             q.z(),  q.w(), -q.x(),
-                        //     //            -q.y(),  q.x(),  q.w();
-                        //     // L(i, 0) <<  q.x(),  q.y(),  q.z(),
-                        //     //             q.y(), -q.x(), -q.w(),
-                        //     //             q.z(),  q.w(), -q.x();
-                        //     // L(i, 1) << -q.y(),  q.x(),  q.w(),
-                        //     //             q.x(),  q.y(),  q.z(),
-                        //     //            -q.w(),  q.z(), -q.y();
-                        //     // L(i, 2) << -q.z(), -q.w(),  q.x(),
-                        //     //             q.w(), -q.z(),  q.y(),
-                        //     //             q.x(),  q.y(),  q.y();
-                        //
-                        //     // Using Eigen's toRotationMatrix
-                        //     double tqx = -2.*q.x(), tqy = -2.*q.y(), tqz = -2.*q.z();
-                        //     L(i, 3) <<     0., -q.z(),  q.y(),
-                        //                 q.z(),     0., -q.x(),
-                        //                -q.y(),  q.x(),     0.;
-                        //     L(i, 0) <<     0.,  q.y(),  q.z(),
-                        //                 q.y(),    tqx, -q.w(),
-                        //                 q.z(),  q.w(),    tqx;
-                        //     L(i, 1) <<    tqy,  q.x(),  q.w(),
-                        //                 q.x(),     0.,  q.z(),
-                        //                -q.w(),  q.z(),    tqy;
-                        //     L(i, 2) <<    tqz, -q.w(),  q.x(),
-                        //                 q.w(),    tqz,  q.y(),
-                        //                 q.x(),  q.y(),     0.;
-                        //
-                        //     [>* Left-multiply by joint's global rotation <]
-                        //     L(i, 0) = R(-1, p) * L(i, 0);
-                        //     L(i, 1) = R(-1, p) * L(i, 1);
-                        //     L(i, 2) = R(-1, p) * L(i, 2);
-                        //     L(i, 3) = R(-1, p) * L(i, 3);
-                        // }
->>>>>>> 89436a6... Implemented quaternion derivatives
                     }
 
-                    size_t lastCacheId = 0;
-                    std::mutex cacheMutex;
-                    auto worker = [evaluate_jacobians, &cacheMutex, &lastCacheId, this]() {
-                        size_t workerCacheId;
+                    // size_t lastCacheId = 0;
+                    // std::mutex cacheMutex;
+                    auto worker = [evaluate_jacobians, this](int workerId) {
+                        size_t workerCacheId = workerId;
                         while (true) {
-                            {
-                                std::lock_guard<std::mutex> lock(cacheMutex);
-                                if (lastCacheId >= caches.size()) break;
-                                workerCacheId = lastCacheId++;
-                            }
+                            // std::lock_guard<std::mutex> lock(cacheMutex);
+                            if (workerCacheId >= caches.size()) break;
                             caches[workerCacheId].updateData(evaluate_jacobians);
+                            workerCacheId += numThreads;
                         }
                     };
 
                     std::vector<boost::thread> threadPool;
                     for (int i = 0; i < numThreads; ++i) {
-                        threadPool.emplace_back(worker);
+                        threadPool.emplace_back(worker, i);
                     }
                     for (auto& thread : threadPool) {
                         thread.join();
@@ -415,9 +338,6 @@ namespace ark {
                   jacobian.resize(commonData.ancestor[pointId].size());
             }
 
-            using JacobianType = Eigen::Matrix<double, 3, 4, Eigen::RowMajor>;
-            using JacobianAlloc = Eigen::aligned_allocator<JacobianType>;
-
             bool get(double* residuals, double** jacobians) const {
                 Eigen::Map<Eigen::Vector3d> residualMap(residuals);
                 residualMap.noalias() = resid;
@@ -428,7 +348,7 @@ namespace ark {
                     }
                     for (size_t i = 0; i < commonData.ancestor[pointId].size(); ++i) {
                         if (jacobians[i+1] != nullptr) {
-                            Eigen::Map<JacobianType> J(jacobians[i+1]);
+                            Eigen::Map<Eigen::Matrix<double, 3, 4, Eigen::RowMajor> > J(jacobians[i+1]);
                             J.topLeftCorner<3,3>().noalias() = jacobian[i];
                             J.rightCols<1>().setZero();
                         }
@@ -450,7 +370,7 @@ namespace ark {
                     //CloudType pointVecs;
 
                     Eigen::Matrix<double, 3, 4> dRot;
-                    Eigen::Matrix3d vCross;
+                    // Eigen::Matrix3d vCross;
                     Eigen::Vector3d v;
 
                     for (size_t i = 0; i < commonData.ancestor[pointId].size(); ++i) {
@@ -462,28 +382,39 @@ namespace ark {
                         for (int assign = 0; assign < ances.num_assign; ++assign) {
                             // up to 4 inner loops
                             int k = ances.assign[assign]; // 'outer' joint assigned to the point
-                            double weight = ances.weight[assign];
-                            v += weight * (commonData.R(j, k) *
+                            v += ances.weight[assign]* (commonData.R(j, k) *
                                     (pointPosInit - commonData.jointPosInit.col(k)) + commonData.t(j, k));
                         }
                         // std::cerr <<v.transpose<< "\n"
 
-                        auto& q = opt.r[j];
-                        dRot.rightCols<1>().noalias() = 2. * q.w() * v + q.vec().cross(v);
-                        vCross << 0., -v(2), v(1),
-                                  v(2), 0., -v(0),
-                                 -v(1), v(0), 0.;
-                        dRot.leftCols<3>().noalias() = 2. * q.vec().dot(v) * Eigen::Matrix3d::Identity() +
-                                                       q.vec() * v.transpose() - v * q.vec().transpose() - q.w() * vCross;
+                        Eigen::Quaterniond& q = opt.r[j];
+                        Eigen::Vector3d u = q.vec() * 2;
+                        double w = q.w() * 2;
+                        dRot << 
+                            u(1)*v(1) + v(2)*u(2)    ,
+                            w*v(2)    + u(0)*v(1)   - 2*u(1)*v(0),
+                           -w*v(1)    - 2*v(0)*u(2) + u(0)*v(2),
+                            u(1)*v(2) - v(1)*u(2),
+
+                           -w*v(2)    - 2*u(0)*v(1) + v(0)*u(1),
+                            v(2)*u(2) + u(0)*v(0),
+                            w*v(0)    + u(1)*v(2)   - 2*v(1)*u(2),
+                            v(0)*u(2) - u(0)*v(2),
+
+                            w*v(1)    + v(0)*u(2)   - 2*u(0)*v(2),
+                           -w*v(0)    - 2*u(1)*v(2) + v(1)*u(2),
+                            u(0)*v(0) + v(1)*u(1),
+                            u(0)*v(1) - v(0)*u(1);
 
                         jacobian[i].noalias() = commonData.R(-1, ava.model.parent[j]) * dRot * commonData.localJacobian[j];
-                        // J.rightCols<1>().setZero();
                     }
                 }
             }
 
             Eigen::Vector3d resid;
-            std::vector<Eigen::Matrix3d, Eigen::aligned_allocator<Eigen::Matrix3d> > jacobian;
+            std::vector<Eigen::Matrix<double, 3, 3, Eigen::RowMajor>,
+                        Eigen::aligned_allocator<
+                            Eigen::Matrix<double, 3, 3, Eigen::RowMajor> > > jacobian;
 
             Avatar& ava;
             AvatarOptimizer& opt;
@@ -568,6 +499,7 @@ namespace ark {
             const int nSmplJoints;
         };
 
+#ifdef TEST_COMPARE_AUTO_DIFF
         /** Auto diff cost function w/ derivative for Ceres
          *  (Extremely poorly optimized, used for checking correctness of analytic derivative) */
         struct AvatarICPAutoDiffCostFunctor {
@@ -589,10 +521,13 @@ namespace ark {
                     Eigen::Matrix<T, 3, 1> vec = (commonData.shapedCloud.col(pointId) - commonData.jointPosInit.col(assign.second)).cast<T>();
                     for (int p = assign.second; p != -1; p = commonData.ava.model.parent[p]) {
                         vec = ConstQuatMap(params[p+1]).toRotationMatrix() * vec;
-                        vec.noalias() += commonData.jointVecInit.col(p);
+                        // Do not add if root joint since we want to add the rootPos
+                        // instead in autodiff case
+                        if (p) vec.noalias() += commonData.jointVecInit.col(p);
                     }
                     resid.noalias() += assign.first * vec;
                 }
+                resid.noalias() += rootPos;
                 resid.noalias() -= dataCloud.col(dataPointId);
                 return true;
             }
@@ -602,9 +537,16 @@ namespace ark {
             size_t cacheId;
             AvatarEvaluationCommonData<AvatarICPCostFunctorCache>& commonData;
         };
+#endif // TEST_COMPARE_AUTO_DIFF
 
-        void findNN(const CloudType & dataCloud, const CloudType & modelCloud,
-            std::vector<std::vector<int> > & correspondences, bool invert = false) {
+        typedef nanoflann::KDTreeEigenColMajorMatrixAdaptor<
+            CloudType, 3, nanoflann::metric_L2_Simple> KdTree;
+        void findNN(const CloudType & data_cloud,
+            const CloudType & model_cloud,
+            std::vector<bool>& point_visible,
+            std::vector<std::vector<int> > & correspondences,
+            bool invert = false,
+            KdTree * kd_tree = nullptr) {
 
             if (invert) {
                 size_t index; double dist;
@@ -612,20 +554,20 @@ namespace ark {
                 // match each data point to a model point
                 typedef nanoflann::KDTreeEigenColMajorMatrixAdaptor<
                     CloudType, 3, nanoflann::metric_L2_Simple> KdTree;
-                KdTree kd(modelCloud, 10);
+                KdTree kd(model_cloud, 10);
                 kd.index->buildIndex();
 
-                correspondences.resize(modelCloud.cols());
-                for (int i = 0; i < modelCloud.cols(); ++i) {
+                correspondences.resize(model_cloud.cols());
+                for (int i = 0; i < model_cloud.cols(); ++i) {
                     correspondences[i].clear();
                 }
-                for (int i = 0; i < dataCloud.cols(); ++i) {
+                for (int i = 0; i < data_cloud.cols(); ++i) {
                     resultSet.init(&index, &dist);
-                    kd.index->findNeighbors(resultSet, dataCloud.data() + i * 3, nanoflann::SearchParams(10));
+                    kd.index->findNeighbors(resultSet, data_cloud.data() + i * 3, nanoflann::SearchParams(10));
                     correspondences[index].push_back(i);
                 }
                 const int MAX_CORRES_PER_POINT = 1;
-                for (int i = 0; i < modelCloud.cols(); ++i) {
+                for (int i = 0; i < model_cloud.cols(); ++i) {
                     if (correspondences[i].size() > MAX_CORRES_PER_POINT) {
                         //std::cerr << correspondences[i].size() << "SZ\n";
                         for (int j = 0; j < MAX_CORRES_PER_POINT; ++j) {
@@ -639,24 +581,31 @@ namespace ark {
             } else {
                 size_t index; double dist;
                 nanoflann::KNNResultSet<double> resultSet(1);
-                // match each model point to a data point
-                typedef nanoflann::KDTreeEigenColMajorMatrixAdaptor<
-                    CloudType, 3, nanoflann::metric_L2_Simple> KdTree;
-                KdTree kd(dataCloud, 10);
-                kd.index->buildIndex();
 
-                correspondences.resize(modelCloud.cols());
-                for (int i = 0; i < modelCloud.cols(); ++i) {
+                // match each model point to a data point
+                bool ownTree = kd_tree == nullptr;
+                if (ownTree) {
+                    kd_tree = new KdTree(data_cloud, 10);
+                    kd_tree->index->buildIndex();
+                }
+
+                correspondences.resize(model_cloud.cols());
+                for (int i = 0; i < model_cloud.cols(); ++i) {
                     correspondences[i].clear();
                 }
-                for (int i = 0; i < modelCloud.cols(); ++i) {
+                for (int i = 0; i < model_cloud.cols(); ++i) {
+                    if (!point_visible[i]) continue;
                     resultSet.init(&index, &dist);
-                    kd.index->findNeighbors(resultSet, modelCloud.data() + i * 3, nanoflann::SearchParams(10));
+                    kd_tree->index->findNeighbors(resultSet, model_cloud.data() + i * 3, nanoflann::SearchParams(10));
                     correspondences[i].push_back(index);
+                }
+
+                if (ownTree) {
+                    delete kd_tree;
                 }
                 /*
                    const int MAX_CORRES_PER_POINT = 200;
-                   for (int i = 0; i < modelCloud.cols(); ++i) {
+                   for (int i = 0; i < model_cloud.cols(); ++i) {
                    if (correspondences[i].size() > MAX_CORRES_PER_POINT) {
                 //std::cerr << correspondences[i].size() << "SZ\n";
                 for (int j = 0; j < MAX_CORRES_PER_POINT; ++j) {
@@ -669,22 +618,26 @@ namespace ark {
                 */
 
             }
-
         }
 
         void debugVisualize(const pcl::visualization::PCLVisualizer::Ptr& viewer,
-                const CloudType& data_cloud, std::vector<std::vector<int> > correspondences, AvatarEvaluationCommonData<AvatarICPCostFunctorCache>& common) {
+                const CloudType& data_cloud, std::vector<std::vector<int> > correspondences,
+               const std::vector<bool>& point_visible, AvatarEvaluationCommonData<AvatarICPCostFunctorCache>& common) {
             auto modelPclCloud = pcl::PointCloud<pcl::PointXYZRGBA>::Ptr(new pcl::PointCloud<pcl::PointXYZRGBA>());
             auto dataPclCloud = pcl::PointCloud<pcl::PointXYZRGBA>::Ptr(new pcl::PointCloud<pcl::PointXYZRGBA>());
-            auto cachesPclCloud = pcl::PointCloud<pcl::PointXYZRGBA>::Ptr(new pcl::PointCloud<pcl::PointXYZRGBA>());
+            // auto matchedModelPointsCloud = pcl::PointCloud<pcl::PointXYZRGBA>::Ptr(new pcl::PointCloud<pcl::PointXYZRGBA>());
             modelPclCloud->reserve(common.ava.cloud.cols());
             for (int i = 0 ; i < common.ava.cloud.cols(); ++i) {
                 pcl::PointXYZRGBA pt;
                 pt.getVector3fMap() = common.ava.cloud.col(i).cast<float>();
-                pt.r = 255;
-                pt.g = 255;
-                pt.b = 0;
-                pt.a = 100;
+                if (!point_visible[i]) {
+                    pt.r = pt.g = pt.b = 100;
+                }  else {
+                    pt.r = 255;
+                    pt.g = 0;
+                    pt.b = 0;
+                }
+                pt.a = 255;
                 modelPclCloud->push_back(std::move(pt));
             }
             dataPclCloud->reserve(data_cloud.cols());
@@ -697,18 +650,18 @@ namespace ark {
                 pt.a = 200;
                 dataPclCloud->push_back(std::move(pt));
             }
-            cachesPclCloud->reserve(common.caches.size());
-            common.PrepareForEvaluation(true, true);
-            for (auto& cache : common.caches) {
-                cache.updateData(false);
-                pcl::PointXYZRGBA pt;
-                pt.getVector3fMap() = cache.resid.cast<float>();
-                pt.r = 0;
-                pt.g = 255;
-                pt.b = 0;
-                pt.a = 255;
-                cachesPclCloud->push_back(std::move(pt));
-            }
+            // matchedModelPointsCloud->reserve(common.caches.size());
+            // common.PrepareForEvaluation(true, true);
+            // for (auto& cache : common.caches) {
+            //     cache.updateData(false);
+            //     pcl::PointXYZRGBA pt;
+            //     pt.getVector3fMap() = cache.resid.cast<float>();
+            //     pt.r = 0;
+            //     pt.g = 255;
+            //     pt.b = 0;
+            //     pt.a = 255;
+            //     matchedModelPointsCloud->push_back(std::move(pt));
+            // }
 
             viewer->setBackgroundColor(0, 0, 0);
             viewer->removePointCloud("cloud");
@@ -717,7 +670,7 @@ namespace ark {
             viewer->removeAllShapes();
             viewer->addPointCloud(modelPclCloud, "cloud", 0);
             viewer->addPointCloud(dataPclCloud, "cloudData", 0);
-            viewer->addPointCloud(cachesPclCloud, "cachesCloud", 0);
+            // viewer->addPointCloud(matchedModelPointsCloud, "cachesCloud", 0);
             /*
             for (int i = 0; i < common.ava.model.numJoints(); ++i) {
                 pcl::PointXYZRGBA curr;
@@ -740,20 +693,21 @@ namespace ark {
             }
             */
 
-            for (size_t i = 0; i < correspondences.size(); ++i) {
-                for (size_t j = 0; j < correspondences[i].size(); ++j) {
-                    if (random_util::uniform(0.0, 1.0) > 0.05) continue;
-                    pcl::PointXYZ p1, p2;
-                    p1.getVector3fMap() = common.ava.cloud.col(i).cast<float>();
-                    p2.getVector3fMap() = data_cloud.col(correspondences[i][j]).cast<float>();
-                    std::string name = "nn_line_" + std::to_string(i) +"_" + std::to_string(correspondences[i][j]);
-                    viewer->addLine<pcl::PointXYZ, pcl::PointXYZ>(p2, p1, 1.0, 0.0, 0.0, name, 0);
-                }
-            }
+            // for (size_t i = 0; i < correspondences.size(); ++i) {
+            //     for (size_t j = 0; j < correspondences[i].size(); ++j) {
+            //         if (random_util::uniform(0.0, 1.0) > 0.05) continue;
+            //         pcl::PointXYZ p1, p2;
+            //         p1.getVector3fMap() = common.ava.cloud.col(i).cast<float>();
+            //         p2.getVector3fMap() = data_cloud.col(correspondences[i][j]).cast<float>();
+            //         std::string name = "nn_line_" + std::to_string(i) +"_" + std::to_string(correspondences[i][j]);
+            //         viewer->addLine<pcl::PointXYZ, pcl::PointXYZ>(p2, p1, 1.0, 0.0, 0.0, name, 0);
+            //     }
+            // }
 
             viewer->spin();
         }
 
+#ifdef TEST_COMPARE_AUTO_DIFF
         /** Given a model point-data point pair, this function checks that autodiff gives the same result
          *  as the user-supplied analytic derivatives. Useful for verifying correctness. */
         void testCompareAutoDiff(AvatarOptimizer& opt, const ark::CloudType& data_cloud, int model_point_id, int data_point_id) {
@@ -866,41 +820,92 @@ namespace ark {
             delete our_cost_function;
             delete cost_function;
         }
+#endif // TEST_COMPARE_AUTO_DIFF
     }
 
-    AvatarOptimizer::AvatarOptimizer(Avatar& ava) : ava(ava) {
+    AvatarOptimizer::AvatarOptimizer(Avatar& ava, const CameraIntrin& intrin,
+            const cv::Size& image_size)
+        : ava(ava), intrin(intrin), imageSize(image_size) {
         r.resize(ava.model.numJoints());
     }
 
-    void AvatarOptimizer::optimize(const Eigen::Matrix<double, 3, Eigen::Dynamic>& data_cloud, int icp_iters) {
+    void AvatarOptimizer::optimize(const Eigen::Matrix<double, 3, Eigen::Dynamic>& data_cloud, int icp_iters, int num_threads) {
+        // Convert to quaternion
         for (int i = 0; i < ava.model.numJoints(); ++i) {
             Eigen::AngleAxisd aa;
             aa.fromRotationMatrix(ava.r[i]);
             r[i] = aa;
         }
         AvatarEvaluationCommonData<AvatarICPCostFunctorCache> common(*this, false);
-        common.numThreads = 4;//boost::thread::hardware_concurrency();;
+        common.numThreads = num_threads;//boost::thread::hardware_concurrency();;
         std::vector<std::vector<int> > correspondences;
 
         auto viewer = pcl::visualization::PCLVisualizer::Ptr(new pcl::visualization::PCLVisualizer("3D Viewport"));
         viewer->initCameraParameters();
 
-        // testCompareAutoDiff(*this, data_cloud, 0, 0);
+#ifdef TEST_COMPARE_AUTO_DIFF
+        testCompareAutoDiff(*this, data_cloud, 0, 0);
+#endif
+
+        AvatarRenderer renderer(ava, intrin);
+        std::vector<bool> pointVisible(ava.cloud.size());
+
+        KdTree kdTree(data_cloud, 10);
+        kdTree.index->buildIndex();
+
+        ceres::Solver::Options options;
+        options.linear_solver_type = ceres::LinearSolverType::DENSE_NORMAL_CHOLESKY;
+        // options.linear_solver_type = ceres::LinearSolverType::DENSE_NORMAL_CHOLESKY;
+        options.trust_region_strategy_type = ceres::DOGLEG;
+        //options.preconditioner_type = ceres::PreconditionerType::CLUSTER_JACOBI;
+        //options.dogleg_type = ceres::DoglegType::SUBSPACE_DOGLEG;
+        options.initial_trust_region_radius = 1e4;
+        options.minimizer_progress_to_stdout = true;
+        options.logging_type = ceres::LoggingType::PER_MINIMIZER_ITERATION;
+        options.minimizer_type = ceres::TRUST_REGION;
+        //options.check_gradients = true;
+        //options.line_search_direction_type = ceres::LBFGS;
+        //options.max_linear_solver_iterations = num_subiter;
+        options.max_num_iterations = 4;
+        options.num_threads = common.numThreads;
+        options.function_tolerance = 1e-4;
+        options.dense_linear_algebra_library_type = ceres::DenseLinearAlgebraLibraryType::LAPACK;
+
+        options.evaluation_callback = &common;
+
         for (int icp_iter = 0; icp_iter < icp_iters; ++icp_iter) {
-            findNN(data_cloud, ava.cloud, correspondences);
+            // Perform point cloud occlusion detection
+            BEGIN_PROFILE;
+            renderer.update();
+            cv::Mat facesMap = renderer.renderFaces(imageSize);
+            const auto& faces = renderer.getOrderedFaces();
+            std::fill(pointVisible.begin(), pointVisible.end(), false);
+            for (int r = 0; r < facesMap.rows; ++r) {
+                auto* ptr = facesMap.ptr<int32_t>(r);
+                for (int c = 0; c < facesMap.cols; ++c) {
+                    if (~ptr[c]) {
+                        pointVisible[ptr[c]]
+                            = pointVisible[ptr[c]] 
+                            = pointVisible[ptr[c]] = true;
+                    }
+                }
+            }
+            PROFILE(>> Occlusion);
+
+            // Find correspondences
+            findNN(data_cloud, ava.cloud, pointVisible, correspondences, false, &kdTree);
+            PROFILE(>> NN Corresponences);
             
             using namespace ceres;
             Problem problem;
 
+            auto fakeQuaternionLocalParam = new ceres::FakeQuaternionParameterization();
             problem.AddParameterBlock(ava.p.data(), 3);
             for (int i = 0; i < ava.model.numJoints(); ++i)  {
-                problem.AddParameterBlock(r[i].coeffs().data(), ROT_SIZE, new FakeQuaternionParameterization());
+                problem.AddParameterBlock(r[i].coeffs().data(), ROT_SIZE, fakeQuaternionLocalParam);
             }
             common.caches.clear();
-            int pointsCnt = 0;
-            int residualsCnt = 0;
             //std::vector<std::tuple<ceres::ResidualBlockId, int, int> > residuals;
-            size_t avgParams = 0;
             std::vector<std::vector<double*> > pointParams(ava.model.numPoints());
             for (int i = 0; i < ava.model.numPoints(); ++i)  {
                 if (correspondences[i].empty()) continue;
@@ -911,9 +916,8 @@ namespace ark {
                 for (auto& ances : common.ancestor[i]) {
                     params.push_back(r[ances.jid].coeffs().data());
                 }
-                ++pointsCnt;
-                avgParams += params.size();
             }
+            PROFILE(>> Construct problem: parameter blocks);
             // // DEBUG
             // std::vector<double*> params;
             // params.push_back(ava.p.data());
@@ -925,20 +929,9 @@ namespace ark {
             for (int i = 0; i < ava.model.numPoints(); ++i)  {
                 if (correspondences[i].empty()) continue;
                 for (int j : correspondences[i]) {
-                    // residuals.emplace_back(
-                     problem.AddResidualBlock(
+                    problem.AddResidualBlock(
                             new AvatarICPCostFunctor(common, cid, data_cloud, j),
                             NULL, pointParams[i]);
-                         // , i, j);
-                     // DynamicAutoDiffCostFunction<AvatarICPAutoDiffCostFunctor>* cost_function = new DynamicAutoDiffCostFunction<AvatarICPAutoDiffCostFunctor>(
-                     //              new AvatarICPAutoDiffCostFunctor(common, cid, data_cloud, j));
-                     // cost_function->AddParameterBlock(3);
-                     // for (int k = 0; k < ava.model.numJoints(); ++k) {
-                     //     cost_function->AddParameterBlock(4);
-                     // }
-                     // cost_function->SetNumResiduals(3);
-                     // problem.AddResidualBlock(cost_function, NULL, params);
-                     ++residualsCnt;
                 }
                 ++cid;
             }
@@ -951,39 +944,146 @@ namespace ark {
             if (betaPose > 0.) {
                 problem.AddResidualBlock(new AvatarPosePriorCostFunctor(common), NULL, posePriorParams);
             }
+            PROFILE(>> Construct problem: residual blocks);
 
-            debugVisualize(viewer, data_cloud, correspondences, common);
-            std::cerr << "Residuals: " << residualsCnt << " Avg params: " << static_cast<double>(avgParams) / pointsCnt << "\n";
-
-            Solver::Options options;
-            options.linear_solver_type = ceres::LinearSolverType::DENSE_NORMAL_CHOLESKY;
-            // options.linear_solver_type = ceres::LinearSolverType::DENSE_NORMAL_CHOLESKY;
-            options.trust_region_strategy_type = ceres::DOGLEG;
-            //options.preconditioner_type = ceres::PreconditionerType::CLUSTER_JACOBI;
-            //options.dogleg_type = ceres::DoglegType::SUBSPACE_DOGLEG;
-            options.initial_trust_region_radius = 1e2;
-            options.minimizer_progress_to_stdout = true;
-            options.logging_type = ceres::LoggingType::PER_MINIMIZER_ITERATION;
-            options.minimizer_type = ceres::TRUST_REGION;
-            //options.check_gradients = true;
-            //options.line_search_direction_type = ceres::LBFGS;
-            //options.max_linear_solver_iterations = num_subiter;
-            options.max_num_iterations = 4;
-            options.num_threads = common.numThreads;
-            options.function_tolerance = 1e-4;
-            options.evaluation_callback = &common;
+            debugVisualize(viewer, data_cloud, correspondences, pointVisible, common);
 
             // Run solver
             Solver::Summary summary;
+            PROFILE(>> Render in PCL);
+
             ceres::Solve(options, &problem, &summary);
+
+            PROFILE(>> Solve);
 
             // output (for debugging)
             std::cout << summary.FullReport() << "\n";
 
+            // Convert from quaternion
             for (int i = 0; i < ava.model.numJoints(); ++i) {
                 ava.r[i].noalias() = r[i].toRotationMatrix();
             }
             ava.update();
+            PROFILE(>> Finish);
+
+            /*
+            // This block shows the value of each residual
+            for (auto& res_tup : residuals) {
+                double val;
+                ceres::Problem::EvaluateOptions eo;
+                eo.residual_blocks.push_back(std::get<0>(res_tup));
+                problem.Evaluate(eo, &val, NULL, NULL, NULL);
+                std::cout << val << " energy = ";
+                std::cout << (ava.cloud.col(std::get<1>(res_tup)) - data_cloud.col(std::get<2>(res_tup))).squaredNorm() * 0.5 << "\n";
+            }*/
+        }
+        viewer->spin();
+    }
+
+    void AvatarOptimizer::align(const Eigen::Matrix<double, 3, Eigen::Dynamic>& smpl_joints, int icp_iters, int num_threads) {
+        // Convert to quaternion
+        for (int i = 0; i < ava.model.numJoints(); ++i) {
+            Eigen::AngleAxisd aa;
+            aa.fromRotationMatrix(ava.r[i]);
+            r[i] = aa;
+        }
+        AvatarEvaluationCommonData<AvatarICPCostFunctorCache> common(*this, false);
+        common.numThreads = num_threads;//boost::thread::hardware_concurrency();;
+
+        auto viewer = pcl::visualization::PCLVisualizer::Ptr(new pcl::visualization::PCLVisualizer("3D Viewport"));
+        viewer->initCameraParameters();
+
+        ceres::Solver::Options options;
+        options.linear_solver_type = ceres::LinearSolverType::DENSE_NORMAL_CHOLESKY;
+        // options.linear_solver_type = ceres::LinearSolverType::DENSE_NORMAL_CHOLESKY;
+        options.trust_region_strategy_type = ceres::DOGLEG;
+        //options.preconditioner_type = ceres::PreconditionerType::CLUSTER_JACOBI;
+        //options.dogleg_type = ceres::DoglegType::SUBSPACE_DOGLEG;
+        options.initial_trust_region_radius = 1e4;
+        options.minimizer_progress_to_stdout = true;
+        options.logging_type = ceres::LoggingType::PER_MINIMIZER_ITERATION;
+        options.minimizer_type = ceres::TRUST_REGION;
+        //options.check_gradients = true;
+        //options.line_search_direction_type = ceres::LBFGS;
+        //options.max_linear_solver_iterations = num_subiter;
+        options.max_num_iterations = 4;
+        options.num_threads = common.numThreads;
+        options.function_tolerance = 1e-4;
+        options.dense_linear_algebra_library_type = ceres::DenseLinearAlgebraLibraryType::LAPACK;
+
+        options.evaluation_callback = &common;
+
+        for (int icp_iter = 0; icp_iter < icp_iters; ++icp_iter) {
+            // Perform point cloud occlusion detection
+            BEGIN_PROFILE;
+
+            using namespace ceres;
+            Problem problem;
+
+            auto fakeQuaternionLocalParam = new ceres::FakeQuaternionParameterization();
+            problem.AddParameterBlock(ava.p.data(), 3);
+            for (int i = 0; i < ava.model.numJoints(); ++i)  {
+                problem.AddParameterBlock(r[i].coeffs().data(), ROT_SIZE, fakeQuaternionLocalParam);
+            }
+            common.caches.clear();
+            //std::vector<std::tuple<ceres::ResidualBlockId, int, int> > residuals;
+            std::vector<std::vector<double*> > pointParams(ava.model.numJoints());
+            for (int i = 0; i < ava.model.numJoints(); ++i)  {
+                auto& params = pointParams[i];
+                common.caches.emplace_back(common, i, false);
+                params.push_back(ava.p.data());
+                int p = ava.model.parent[i];
+                while (p != -1) {
+                    params.push_back(r[p].coeffs().data());
+                    p = ava.model.parent[p];
+                }
+                std::reverse(params.begin(), params.end());
+            }
+            PROFILE(>> Construct problem: parameter blocks);
+            // // DEBUG
+            // std::vector<double*> params;
+            // params.push_back(ava.p.data());
+            // for (int k = 0; k < ava.model.numJoints(); ++k) {
+            //     params.push_back(r[k].coeffs().data());
+            // }
+            // //END DEBUG
+            int cid = 0;
+            for (int i = 0; i < ava.model.numJoints(); ++i)  {
+                problem.AddResidualBlock(
+                        new AvatarICPCostFunctor(common, cid, smpl_joints, i),
+                        NULL, pointParams[i]);
+                ++cid;
+            }
+
+            std::vector<double*> posePriorParams;
+            posePriorParams.reserve(ava.model.numJoints() - 1);
+            for (int i = 1; i < ava.model.numJoints(); ++i) {
+                posePriorParams.push_back(r[i].coeffs().data());
+            }
+            if (betaPose > 0.) {
+                problem.AddResidualBlock(new AvatarPosePriorCostFunctor(common), NULL, posePriorParams);
+            }
+            PROFILE(>> Construct problem: residual blocks);
+
+            // debugVisualize(viewer, data_cloud, correspondences, pointVisible, common);
+
+            // Run solver
+            Solver::Summary summary;
+            PROFILE(>> Render in PCL);
+
+            ceres::Solve(options, &problem, &summary);
+
+            PROFILE(>> Solve);
+
+            // output (for debugging)
+            std::cout << summary.FullReport() << "\n";
+
+            // Convert from quaternion
+            for (int i = 0; i < ava.model.numJoints(); ++i) {
+                ava.r[i].noalias() = r[i].toRotationMatrix();
+            }
+            ava.update();
+            PROFILE(>> Finish);
 
             /*
             // This block shows the value of each residual

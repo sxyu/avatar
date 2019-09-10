@@ -64,7 +64,7 @@ namespace {
         out[2] = rho * sin(phi) * sin(theta);
     }
 
-    /** Paint projected triangle on depth map using barycentric coords */
+    /** Paint projected triangle on depth map using barycentric linear interp */
     inline void paintDepthTriangleBary(
             cv::Mat& output_depth,
             const cv::Size& image_size,
@@ -145,7 +145,7 @@ namespace {
         }
     }
 
-    /** Paint projected triangle on part mask (CV_8U) using nearest neighbors */
+    /** Paint projected triangle on part mask (CV_8U) using nearest neighbors interp */
     inline void paintPartsTriangleNN(
             cv::Mat& output_assigned_joint_mask,
             const cv::Size& image_size,
@@ -248,6 +248,75 @@ namespace {
             }
         }
     }
+
+    /** Paint projected triangle on int image (CV_32I) by to single color */
+    inline void paintTriangleSingleColor(
+            cv::Mat& output_image,
+            const cv::Size& image_size,
+            const std::vector<cv::Point2f>& projected,
+            const cv::Vec3i& face,
+            int color) {
+        std::pair<double, int> xf[3] =
+        {
+            {projected[face[0]].x, 0},
+            {projected[face[1]].x, 1},
+            {projected[face[2]].x, 2}
+        };
+        std::sort(xf, xf+3);
+
+        // reorder points for convenience
+        auto a = projected[face[xf[0].second]],
+        b = projected[face[xf[1].second]],
+        c = projected[face[xf[2].second]];
+        a.x = std::floor(a.x);
+        c.x = std::ceil(c.x);
+        if (a.x == c.x) return;
+
+        int minxi = std::max<int>(a.x, 0),
+            maxxi = std::min<int>(c.x, image_size.width-1),
+            midxi = std::floor(b.x);
+
+        if (a.x != b.x) {
+            double mhi = (c.y-a.y)/(c.x-a.x);
+            double bhi = a.y - a.x * mhi;
+            double mlo = (b.y-a.y)/(b.x-a.x);
+            double blo = a.y - a.x * mlo;
+            if (b.y > c.y) {
+                std::swap(mlo, mhi);
+                std::swap(blo, bhi);
+            }
+            for (int i = minxi; i <= std::min(midxi, image_size.width-1); ++i) {
+                int minyi = std::max<int>(std::floor(mlo * i + blo), 0),
+                    maxyi = std::min<int>(std::ceil(mhi * i + bhi), image_size.height-1);
+                if (minyi > maxyi) continue;
+
+                for (int j = minyi; j <= maxyi; ++j) {
+                    output_image.at<int32_t>(j, i) = color;
+                }
+            }
+        }
+        if (b.x != c.x) {
+            double mhi = (c.y-a.y)/(c.x-a.x);
+            double bhi = a.y - a.x * mhi;
+            double mlo = (c.y-b.y)/(c.x-b.x);
+            double blo = b.y - b.x * mlo;
+            if (b.y > a.y) {
+                std::swap(mlo, mhi);
+                std::swap(blo, bhi);
+            }
+            for (int i = std::max(midxi, 0)+1; i <= maxxi; ++i) {
+                int minyi = std::max<int>(std::floor(mlo * i + blo), 0),
+                    maxyi = std::min<int>(std::ceil(mhi * i + bhi), image_size.height-1);
+                if (minyi > maxyi) continue;
+
+                double w1v = (b.y - c.y) * (i - c.x);
+                double w2v = (c.y - a.y) * (i - c.x);
+                for (int j = minyi; j <= maxyi; ++j) {
+                    output_image.at<int32_t>(j, i) = color;
+                }
+            }
+        }
+    }
 }
 
 namespace ark {
@@ -272,13 +341,15 @@ namespace ark {
 
         // Assume joints are given in topologically sorted order
         parent.resize(nJoints);
+        initialJointPos.resize(3, nJoints);
         for (int i = 0; i < nJoints; ++i) {
             int id;
-            std::string _name; double _x, _y, _z; // throw away
+            std::string _name; // throw away
 
             skel >> id;
             skel >> parent[id];
-            skel >> _name >> _x >> _y >> _z;
+            skel >> _name >> initialJointPos(0, i)
+                 >> initialJointPos(1, i) >> initialJointPos(2, i);
         }
         parent[0] = -1; // This should be in skeleton file, but just to make sure
 
@@ -482,6 +553,50 @@ namespace ark {
         return model.posePrior.pdf(smplParams());
     }
 
+    void Avatar::alignToJoints(const CloudType & pos)
+    {
+        ARK_ASSERT(pos.cols() == SmplJoint::_COUNT, "Joint number mismatch");
+
+        Eigen::Vector3d vr = model.initialJointPos.col(SmplJoint::SPINE1) - model.initialJointPos.col(SmplJoint::ROOT_PELVIS);
+        Eigen::Vector3d vrt = pos.col(SmplJoint::SPINE1) - pos.col(SmplJoint::ROOT_PELVIS);
+        if (!std::isnan(pos(0, 0))) {
+            p = pos.col(0);
+        }
+        if (!std::isnan(vr.x()) && !std::isnan(vrt.x())) {
+            r[0] = Eigen::Quaterniond::FromTwoVectors(vr, vrt).toRotationMatrix();
+        } else{
+            r[0].setIdentity();
+        }
+
+        std::vector<Eigen::Matrix3d, Eigen::aligned_allocator<Eigen::Matrix3d> > rotTrans(pos.cols());
+        rotTrans[0] = r[0];
+
+        double scaleAvg = 0.0;
+        for (int i = 1; i < pos.cols(); ++i) {
+            scaleAvg += (pos.col(i) - pos.col(model.parent[i])).norm() /
+                (model.initialJointPos.col(i) - model.initialJointPos.col(model.parent[i])).norm();
+        }
+        scaleAvg /= (pos.cols() - 1.0);
+        double baseScale = (model.initialJointPos.col(SmplJoint::SPINE2) - model.initialJointPos.col(SmplJoint::ROOT_PELVIS)).norm() * (scaleAvg - 1.0);
+
+        /** units to increase shape key 0 by to widen the avatar by approximately 1 meter */
+        const double PC1_DIST_FACT = 32.0;
+        w[0] = baseScale * PC1_DIST_FACT;
+        if (isnan(w[0])) w[0] = 1.5;
+
+        for (int i = 1; i < pos.cols(); ++i) {
+            rotTrans[i] = rotTrans[model.parent[i]];
+            if (!std::isnan(pos(0, i))) {
+                Eigen::Vector3d vv = model.initialJointPos.col(i) - model.initialJointPos.col(model.parent[i]);
+                Eigen::Vector3d vvt = pos.col(i) - pos.col(model.parent[i]);
+                rotTrans[i] = Eigen::Quaterniond::FromTwoVectors(vv, vvt).toRotationMatrix();
+                r[i] = rotTrans[model.parent[i]].transpose() * rotTrans[i];
+            } else {
+                r[i].setIdentity();
+            }
+        }
+    }
+
     namespace avatar_pcl {
         pcl::PointCloud<pcl::PointXYZ>::Ptr getCloud(const Avatar& ava) {
             auto pointCloud = pcl::PointCloud<pcl::PointXYZ>::Ptr(new pcl::PointCloud<pcl::PointXYZ>);
@@ -589,6 +704,18 @@ namespace ark {
             paintPartsTriangleNN(partMaskMap, image_size, projected, ava.model.assignedJoints, faces[i].second, part_map);
         }
         return partMaskMap;
+    }
+
+    cv::Mat AvatarRenderer::renderFaces(const cv::Size& image_size) const {
+        const auto& projected = getProjectedPoints();
+        const auto& faces = getOrderedFaces();
+
+        cv::Mat facesMap = cv::Mat::zeros(image_size, CV_32S);
+        facesMap.setTo(-1);
+        for (int i = 0; i < ava.model.numFaces(); ++i) {
+            paintTriangleSingleColor(facesMap, image_size, projected, faces[i].second, i);
+        }
+        return facesMap;
     }
 
     void AvatarRenderer::update() const {

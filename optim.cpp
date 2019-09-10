@@ -72,12 +72,11 @@ int main(int argc, char** argv) {
 
     const AvatarModel model;
     Avatar ava(model);
-    //ava.randomize();
     
     Eigen::Vector3d pos;
-    pos.x() = 0.0;//random_util::uniform(-1.0, 1.0);
-    pos.y() = 0.0;//random_util::uniform(-0.5, 0.5);
-    pos.z() = 3.2;random_util::uniform(2.2, 4.5);
+    pos.x() = random_util::uniform(-1.0, 1.0);
+    pos.y() = random_util::uniform(-0.5, 0.5);
+    pos.z() = random_util::uniform(2.2, 4.5);
     ava.randomize();
     //ava.r[0] = Eigen::AngleAxisd(M_PI, Eigen::Vector3d(0.,1.,0.));
     //ava.r[ark::SmplJoint::R_SHOULDER] = Eigen::AngleAxisd(M_PI/6, Eigen::Vector3d(0.,1.,0.));
@@ -142,9 +141,9 @@ int main(int argc, char** argv) {
     //ava2.r[ark::SmplJoint::R_SHOULDER] = Eigen::AngleAxisd(M_PI/6, Eigen::Vector3d(0.,1.,0.));
     ava2.update();
 
-    AvatarOptimizer optim(ava2);
+    AvatarOptimizer optim(ava2, intrin, size);
     optim.betaPose = betaPose;
-    optim.optimize(dataCloud, iters);
+    optim.optimize(dataCloud, iters, numThreads);
 
     ava2.update();
     

@@ -90,6 +90,9 @@ namespace ark {
          *  each column is vectorized matrix of points x1 y1 z1 x2 y2 z2 ... */
         MatrixType keyClouds;
 
+        /** ADVANCED: Initial joint positions */
+        CloudType initialJointPos;
+
         /** ADVANCED: Joint regressor for recovering joint positions from surface points (num points, num joints) */
         Eigen::SparseMatrix<double> jointRegressor;
 
@@ -132,6 +135,9 @@ namespace ark {
 
         /** Get GMM pdf (likelihood) for current joint rotation parameters */
         double pdf() const;
+
+        /** Try to fit avatar's pose parameters, so that joints are approximately aligned to the given positions. Automatically sets joints prior to joint_pos. */
+        void alignToJoints(const CloudType & joint_pos);
 
         /** The avatar model */
         const AvatarModel& model;
