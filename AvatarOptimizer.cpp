@@ -123,7 +123,7 @@ namespace ark {
 
             AvatarEvaluationCommonData(AvatarOptimizer& opt, bool shape_enabled = false)
                 : opt(opt), ava(opt.ava), nJoints(opt.ava.model.numJoints()), shape_enabled(shape_enabled) {
-                _L.resize(nJoints * AvatarOptimizer::ROT_SIZE);
+                // _L.resize(nJoints * AvatarOptimizer::ROT_SIZE);
                 localJacobian.resize(nJoints);
                 ++nJoints;
                 _R.resize(nJoints * nJoints);
@@ -192,20 +192,19 @@ namespace ark {
                     jointVecInit.col(0).noalias() = ava.p;
 
                     for (int i = 0; i < nJoints - 1; ++i) {
-                        double * jacobian = localJacobian[i].data();
+                        // double * jacobian = localJacobian[i].data();
                         double * x = opt.r[i].coeffs().data();
-                        jacobian[0] =  x[3]; jacobian[1]  =  x[2]; jacobian[2]  = -x[1];
-                        jacobian[3] = -x[2]; jacobian[4]  =  x[3]; jacobian[5]  =  x[0];
-                        jacobian[6] =  x[1]; jacobian[7]  = -x[0]; jacobian[8]  =  x[3];
-                        jacobian[9] = -x[0]; jacobian[10] = -x[1]; jacobian[11] = -x[2];
+                        localJacobian[i] << x[3],  x[2], -x[1],
+                                           -x[2],  x[3],  x[0],
+                                            x[1], -x[0],  x[3],
+                                           -x[0], -x[1], -x[2];
                     }
 
                     R(-1, -1).setIdentity(); // -1 means 'to global'
                     t(-1, -1).setZero();//.noalias() = ava.p;
                     for (int i = 0; i < nJoints - 1; ++i) {
                         R(i, i).setIdentity();
-                        Eigen::Quaterniond q = opt.r[i].template cast<double>();
-                        Eigen::Matrix3d rot = q.toRotationMatrix();
+                        Eigen::Matrix3d rot = opt.r[i].toRotationMatrix();
                         t(i, i).setZero(); //.noalias() = jointVecInit.col(i);
                         int p = ava.model.parent[i];
                         for (int j = p; ; j = ava.model.parent[j]) {
@@ -214,6 +213,7 @@ namespace ark {
                             if (j == -1) break;
                         }
 
+<<<<<<< HEAD
                         if (evaluate_jacobians) {
                             // Fill the derivatives of the local to parent local
                             // rotation matrix
@@ -253,6 +253,47 @@ namespace ark {
                             L(i, 2) = R(-1, p) * L(i, 2);
                             L(i, 3) = R(-1, p) * L(i, 3);
                         }
+=======
+                        // if (evaluate_jacobians) {
+                        //     // Fill the derivatives of the local to parent local
+                        //     // rotation matrix
+                        //     q.coeffs() *= 2;
+                        //     // Using rotation matrix from Terzakis et al.
+                        //     // L(i, 3) <<  q.w(), -q.z(),  q.y(),
+                        //     //             q.z(),  q.w(), -q.x(),
+                        //     //            -q.y(),  q.x(),  q.w();
+                        //     // L(i, 0) <<  q.x(),  q.y(),  q.z(),
+                        //     //             q.y(), -q.x(), -q.w(),
+                        //     //             q.z(),  q.w(), -q.x();
+                        //     // L(i, 1) << -q.y(),  q.x(),  q.w(),
+                        //     //             q.x(),  q.y(),  q.z(),
+                        //     //            -q.w(),  q.z(), -q.y();
+                        //     // L(i, 2) << -q.z(), -q.w(),  q.x(),
+                        //     //             q.w(), -q.z(),  q.y(),
+                        //     //             q.x(),  q.y(),  q.y();
+                        //
+                        //     // Using Eigen's toRotationMatrix
+                        //     double tqx = -2.*q.x(), tqy = -2.*q.y(), tqz = -2.*q.z();
+                        //     L(i, 3) <<     0., -q.z(),  q.y(),
+                        //                 q.z(),     0., -q.x(),
+                        //                -q.y(),  q.x(),     0.;
+                        //     L(i, 0) <<     0.,  q.y(),  q.z(),
+                        //                 q.y(),    tqx, -q.w(),
+                        //                 q.z(),  q.w(),    tqx;
+                        //     L(i, 1) <<    tqy,  q.x(),  q.w(),
+                        //                 q.x(),     0.,  q.z(),
+                        //                -q.w(),  q.z(),    tqy;
+                        //     L(i, 2) <<    tqz, -q.w(),  q.x(),
+                        //                 q.w(),    tqz,  q.y(),
+                        //                 q.x(),  q.y(),     0.;
+                        //
+                        //     [>* Left-multiply by joint's global rotation <]
+                        //     L(i, 0) = R(-1, p) * L(i, 0);
+                        //     L(i, 1) = R(-1, p) * L(i, 1);
+                        //     L(i, 2) = R(-1, p) * L(i, 2);
+                        //     L(i, 3) = R(-1, p) * L(i, 3);
+                        // }
+>>>>>>> 89436a6... Implemented quaternion derivatives
                     }
 
                     size_t lastCacheId = 0;
@@ -287,9 +328,9 @@ namespace ark {
                 return _t[nJoints * (j_ancestor+1) + j+1];
             }
             /** Combined left-side matrix to multiply into Jacobians for joint j, component t */
-            inline Eigen::Matrix3d& L(int j, int t) {
-                return _L[j * AvatarOptimizer::ROT_SIZE + t];
-            }
+            // inline Eigen::Matrix3d& L(int j, int t) {
+            //     return _L[j * AvatarOptimizer::ROT_SIZE + t];
+            // }
             AvatarOptimizer& opt;
             Avatar& ava;
             int nJoints;
@@ -359,7 +400,7 @@ namespace ark {
             std::vector<Eigen::Vector3d, VecAlloc> _t;
 
             /** Combined left-side matrix to use for Jacobians for joint j, component t */
-            std::vector<Eigen::Matrix3d, MatAlloc> _L;
+            // std::vector<Eigen::Matrix3d, MatAlloc> _L;
 
             /** True if CalcShape() has been called, to avoid further calls */
             bool shape_computed;
@@ -388,7 +429,7 @@ namespace ark {
                     for (size_t i = 0; i < commonData.ancestor[pointId].size(); ++i) {
                         if (jacobians[i+1] != nullptr) {
                             Eigen::Map<JacobianType> J(jacobians[i+1]);
-                            J.topLeftCorner<3,3>().noalias() = jacobian[i].topLeftCorner<3,3>();
+                            J.topLeftCorner<3,3>().noalias() = jacobian[i];
                             J.rightCols<1>().setZero();
                         }
                     }
@@ -408,41 +449,41 @@ namespace ark {
                     // TODO: precompute point-to-assigned-joint vector, reduce 3 flops
                     //CloudType pointVecs;
 
+                    Eigen::Matrix<double, 3, 4> dRot;
+                    Eigen::Matrix3d vCross;
+                    Eigen::Vector3d v;
+
                     for (size_t i = 0; i < commonData.ancestor[pointId].size(); ++i) {
                         // Set derivative for each parent rotation
                         auto& ances = commonData.ancestor[pointId][i];
                         int j = ances.jid; // 'middle' joint we are differenting wrt
-                        auto& J = jacobian[i];
-                        for (int t = 0; t < 4; ++t) {
-                            // 4 loops
-                            J.col(t).setZero();
-                            for (int assign = 0; assign < ances.num_assign; ++assign) {
-                                // up to 4 inner loops
-                                int k = ances.assign[assign]; // 'outer' joint assigned to the point
-                                double weight = ances.weight[assign];
-                                // if (j == 4 && t == 3) {
-                                //     std::cerr << "! " << k << " assign, wt " << weight << " tt " << (pointPosInit - commonData.jointPosInit.col(k)).transpose()  <<"\n" << commonData.L(j, t) << " L\n\n" << commonData.R(j, k) << " R\n\n" << commonData.t(j, k).transpose() << "t\n--\n\n";
-                                // }
-                                J.col(t) += weight * (commonData.L(j, t) *
-                                        (commonData.R(j, k) *
-                                        (pointPosInit - commonData.jointPosInit.col(k)) + commonData.t(j, k)));
-                                // 42 flops
-                            }
-                            // <=168 flops
+
+                        v.setZero();
+                        for (int assign = 0; assign < ances.num_assign; ++assign) {
+                            // up to 4 inner loops
+                            int k = ances.assign[assign]; // 'outer' joint assigned to the point
+                            double weight = ances.weight[assign];
+                            v += weight * (commonData.R(j, k) *
+                                    (pointPosInit - commonData.jointPosInit.col(k)) + commonData.t(j, k));
                         }
-                        J.topLeftCorner<3, 3>() = J * commonData.localJacobian[j];
-                        //J.col(3).setZero();
-                        // <=672 flops
+                        // std::cerr <<v.transpose<< "\n"
+
+                        auto& q = opt.r[j];
+                        dRot.rightCols<1>().noalias() = 2. * q.w() * v + q.vec().cross(v);
+                        vCross << 0., -v(2), v(1),
+                                  v(2), 0., -v(0),
+                                 -v(1), v(0), 0.;
+                        dRot.leftCols<3>().noalias() = 2. * q.vec().dot(v) * Eigen::Matrix3d::Identity() +
+                                                       q.vec() * v.transpose() - v * q.vec().transpose() - q.w() * vCross;
+
+                        jacobian[i].noalias() = commonData.R(-1, ava.model.parent[j]) * dRot * commonData.localJacobian[j];
+                        // J.rightCols<1>().setZero();
                     }
-                    // <=16,128 flops
-                    // TODO: support shape key parameters here
-                    // either that or use ADMM (since may be too costly)
                 }
-                // all residuals: <=110,476,800 flops hopefully less
             }
 
             Eigen::Vector3d resid;
-            std::vector<JacobianType, JacobianAlloc> jacobian;
+            std::vector<Eigen::Matrix3d, Eigen::aligned_allocator<Eigen::Matrix3d> > jacobian;
 
             Avatar& ava;
             AvatarOptimizer& opt;
@@ -921,8 +962,8 @@ namespace ark {
             //options.preconditioner_type = ceres::PreconditionerType::CLUSTER_JACOBI;
             //options.dogleg_type = ceres::DoglegType::SUBSPACE_DOGLEG;
             options.initial_trust_region_radius = 1e2;
-            options.minimizer_progress_to_stdout = false;
-            options.logging_type = ceres::LoggingType::SILENT;//PER_MINIMIZER_ITERATION;
+            options.minimizer_progress_to_stdout = true;
+            options.logging_type = ceres::LoggingType::PER_MINIMIZER_ITERATION;
             options.minimizer_type = ceres::TRUST_REGION;
             //options.check_gradients = true;
             //options.line_search_direction_type = ceres::LBFGS;
