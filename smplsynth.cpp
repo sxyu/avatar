@@ -16,6 +16,7 @@
 
 #include "AvatarRenderer.h"
 #include "Config.h"
+#include "Util.h"
 
 namespace {
 using namespace ark;
@@ -35,8 +36,12 @@ void run(int num_threads, int num_to_gen, std::string out_path, const cv::Size& 
     }
     if (!boost::filesystem::exists(depthPath)) {
         boost::filesystem::create_directories(depthPath);
-    } if (!boost::filesystem::exists(jointsPath)) {
+    }
+    if (!boost::filesystem::exists(jointsPath)) {
         boost::filesystem::create_directories(jointsPath);
+    }
+    if (!boost::filesystem::exists(partMaskPath)) {
+        boost::filesystem::create_directories(partMaskPath);
     }
 
     intrin.writeFile(intrinPath.string());
@@ -69,13 +74,24 @@ void run(int num_threads, int num_to_gen, std::string out_path, const cv::Size& 
             return;
         }
 
+        AvatarPoseSequence poseSequence;
+        if (!poseSequence.numFrames) {
+            std::cerr << "WARNING: no mocap pose sequence found, will fallback to GMM to generate poses\n";
+        }
+
         while(true) {
             int i;
             if (!que.pop(i)) break;
             std::stringstream ss_img_id;
             ss_img_id << std::setw(8) << std::setfill('0') << std::to_string(i);
 
-            ava.randomize();
+            if (poseSequence.numFrames) {
+                poseSequence.poseAvatar(ava, random_util::randint<size_t>(0, poseSequence.numFrames - 1));
+                ava.r[0].setIdentity();
+                ava.randomize(false, true, true);
+            } else {
+                ava.randomize();
+            }
             ava.update();
             
             ark::AvatarRenderer renderer(ava, intrin);

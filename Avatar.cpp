@@ -443,6 +443,15 @@ namespace ark {
         }
     }
 
+    Eigen::VectorXd AvatarPoseSequence::getFrame(size_t frame_id) const {
+        std::ifstream ifs(sequencePath, std::ios::in | std::ios::binary);
+        ifs.seekg(frame_id * frameSize * sizeof(double), std::ios_base::beg);
+        Eigen::VectorXd result(frameSize);
+        ifs.read(reinterpret_cast<char*>(result.data()),
+                 frameSize * sizeof(double));
+        return result;
+    }
+
     Avatar::Avatar(const AvatarModel& model) : model(model) {
         assignVecs.resize(3, model.assignWeights.rows());
         w.resize(model.numShapeKeys());
@@ -500,42 +509,53 @@ namespace ark {
         // PROFILE(UPDATE New);
     }
 
-    void Avatar::randomize() {
+    void Avatar::randomize(bool randomize_pose,
+            bool randomize_shape, bool randomize_root_pos_rot) {
         // Shape keys
-        for (int i = 0; i < model.numShapeKeys(); ++i) {
-            w(i) = random_util::randn();
+        if (randomize_shape) {
+            for (int i = 0; i < model.numShapeKeys(); ++i) {
+                w(i) = random_util::randn();
+            }
         }
 
         // Pose
-        auto samp = model.posePrior.sample();
-        for (int i = 0; i < model.numJoints()-1; ++i) {
-            // Axis-angle to rotation matrix
-            Eigen::AngleAxisd angleAxis;
-            angleAxis.angle() = samp.segment<3>(i*3).norm();
-            angleAxis.axis() = samp.segment<3>(i*3) / angleAxis.angle();
-            r[i + 1] = angleAxis.toRotationMatrix();
+        if (randomize_pose) {
+            auto samp = model.posePrior.sample();
+            for (int i = 0; i < model.numJoints()-1; ++i) {
+                // Axis-angle to rotation matrix
+                Eigen::AngleAxisd angleAxis;
+                angleAxis.angle() = samp.segment<3>(i*3).norm();
+                angleAxis.axis() = samp.segment<3>(i*3) / angleAxis.angle();
+                r[i + 1] = angleAxis.toRotationMatrix();
+            }
         }
 
-        // Root position
-        Eigen::Vector3d pos;
-        pos.x() = random_util::uniform(-1.0, 1.0);
-        pos.y() = random_util::uniform(-0.5, 0.5);
-        pos.z() = random_util::uniform(2.2, 4.5);
-        p = pos;
+        if (randomize_root_pos_rot) {
+            // Root position
+            Eigen::Vector3d pos;
+            pos.x() = random_util::uniform(-1.0, 1.0);
+            pos.y() = random_util::uniform(-0.5, 0.5);
+            pos.z() = random_util::uniform(2.2, 4.5);
+            p = pos;
 
-        // Root rotation
-        const Eigen::Vector3d axis_up(0., 1., 0.);
-        double angle_up  = random_util::uniform(-M_PI / 3., M_PI / 3.) + M_PI;
-        Eigen::AngleAxisd aa_up(angle_up, axis_up);
+            // Root rotation
+            const Eigen::Vector3d axis_up(0., 1., 0.);
+            double angle_up  = random_util::uniform(-M_PI / 3., M_PI / 3.) + M_PI;
+            Eigen::AngleAxisd aa_up(angle_up, axis_up);
 
-        double theta = random_util::uniform(0, 2 * M_PI);
-        double phi   = random_util::uniform(-M_PI/2, M_PI/2);
-        Eigen::Vector3d axis_perturb;
-        fromSpherical(1.0, theta, phi, axis_perturb);
-        double angle_perturb = random_util::randn(0.0, 0.2);
-        Eigen::AngleAxisd aa_perturb(angle_perturb, axis_perturb);
+            double theta = random_util::uniform(0, 2 * M_PI);
+            double phi   = random_util::uniform(-M_PI/2, M_PI/2);
+            Eigen::Vector3d axis_perturb;
+            fromSpherical(1.0, theta, phi, axis_perturb);
+            double angle_perturb = random_util::randn(0.0, 0.2);
+            Eigen::AngleAxisd aa_perturb(angle_perturb, axis_perturb);
 
-        r[0] = (aa_perturb * aa_up).toRotationMatrix();
+            r[0] = (aa_perturb * aa_up).toRotationMatrix();
+        }
+    }
+
+    void randomMocapPose() {
+        random_util::randint(0, 100);
     }
 
     Eigen::VectorXd Avatar::smplParams() const {
@@ -722,5 +742,40 @@ namespace ark {
         projectedPoints.clear();
         projectedJoints.clear();
         orderedFaces.clear();
+    }
+
+    AvatarPoseSequence::AvatarPoseSequence(
+            const std::string& pose_sequence_path) {
+        using namespace boost::filesystem;
+        path seqPath = pose_sequence_path.empty() ? util::resolveRootPath("data/avatar-mocap/cmu-mocap.dat") : pose_sequence_path;
+        path metaPath(std::string(seqPath.string()).append(".txt"));
+
+        if (!exists(seqPath) || !exists(metaPath)) {
+            numFrames = 0;
+            return;
+        }
+        sequencePath = seqPath.string();
+        
+        std::ifstream metaIfs(metaPath.string());
+        size_t nSubseq, frameSizeBytes, subseqStart;
+        metaIfs >> nSubseq >> numFrames >> frameSizeBytes;
+        std::string subseqName;
+        for (int sid = 0; sid < nSubseq; ++sid) {
+            metaIfs >> subseqStart >> subseqName;
+            subsequences[subseqName] = subseqStart / frameSizeBytes;
+        }
+        metaIfs.close();
+
+        frameSize = frameSizeBytes / sizeof(double);
+    }
+
+    void AvatarPoseSequence::poseAvatar(Avatar& ava, size_t frame_id) const {
+        Eigen::VectorXd frameData = getFrame(frame_id);
+        ava.p = frameData.head<3>();
+        Eigen::Quaterniond q;
+        for (int i = 0; i < ava.r.size(); ++i) { 
+            q.coeffs().noalias() = frameData.segment<4>(i * 4 + 3);
+            ava.r[i].noalias() = q.toRotationMatrix();
+        }
     }
 }
