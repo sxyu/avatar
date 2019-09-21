@@ -127,8 +127,11 @@ namespace ark {
         void update();
 
         /** Randomize avatar's pose and shape according to PCA (shape) and GMM model (pose). */
-        void randomize();
+        void randomize(bool randomize_pose = true, bool randomize_shape = true,
+                       bool randomize_root_pos_rot = true);
 
+        /** Random pose from mocap. Requires mocap data (avatar/avatar-mocap) to be downloaded. */
+        void randomMocapPose();
 
         /** Compute the avatar's SMPL pose parameters (axis-angle) */
         Eigen::VectorXd smplParams() const;
@@ -169,5 +172,33 @@ namespace ark {
 
         /** INTERNAL for caching use: Position of points relative to each assigned point (3, num assignments total) */
         CloudType assignVecs;
+    };
+
+    /** A sequence of avatar poses */
+    struct AvatarPoseSequence {
+        /** Create from a sequence file. This should be a binary file,
+         *  and there should exist an additional metadata file (<file>.txt)
+         *  By default, uses <proj-root>/data/avatar-mocap/cmu-mocap.dat */
+        AvatarPoseSequence(const std::string& pose_sequence_path = "");
+
+        /** Load a frame as a raw vector of doubles */
+        Eigen::VectorXd getFrame(size_t frame_id) const;
+
+        /** Set the pose of the given avatar class to fit the given
+         *  frame in the sequence. Assumes first three values are position,
+         *  rest are rotations as quaternions */
+        void poseAvatar(Avatar& ava, size_t frame_id) const;
+
+        /** Map subsequence name to start frame number */
+        std::map<std::string, size_t> subsequences;
+
+        /** Total number of frames */
+        size_t numFrames;
+
+        /** Number of doubles (8 bytes) per frame */
+        size_t frameSize;
+
+        /** Path to sequence file */
+        std::string sequencePath;
     };
 }

@@ -62,7 +62,7 @@ namespace ark {
 
         std::string resolveRootPath(const std::string & root_path)
         {
-            static const std::string TEST_PATH = "config/hand-svm/svm.xml";
+            static const std::string TEST_PATH = "data/avatar-model/extract.py";
             static const int MAX_LEVELS = 3;
             static std::string rootDir = "\n";
             if (rootDir == "\n") {

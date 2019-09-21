@@ -84,12 +84,10 @@ void __avatarGUI()
             }
         }
         if (controlsChanged) {
-            //viewer->removeAllPointClouds(vp1);
-            //viewer->removeAllShapes(vp1);
             ava.update();
 
-            //viewer->removePointCloud("vp1_cloudHM");
-            //viewer->addPointCloud<pcl::PointXYZ>(avatar_pcl::getCloud(ava), "vp1_cloudHM", vp1);
+            viewer->removePointCloud("vp1_cloudHM");
+            viewer->addPointCloud<pcl::PointXYZ>(avatar_pcl::getCloud(ava), "vp1_cloudHM", vp1);
             viewer->removePolygonMesh("meshHM");
 
             auto mesh = ark::avatar_pcl::getMesh(ava);
@@ -120,9 +118,6 @@ void __avatarGUI()
                 viewer->addText("-log likelihood: " + std::to_string(prior), 10, 20, 15, 1.0, 1.0, 1.0, "poseprior_disp");
             }
 
-            // viewer->removePointCloud("vp1_cloudHM");
-            // viewer->addPointCloud<pcl::PointXYZ>(ava.getCloud(), "vp1_cloudHM");
-            // ava.visualize(viewer, "vp1_", vp1);
         }
         for (int i = 0; i < N_CTRL; ++i) p_ctrlw[i] = ctrlw[i];
         for (int i = 0; i < (int)pcw.size(); ++i) p_pcw[i] = pcw[i];
