@@ -474,7 +474,7 @@ namespace ark {
             }
         }
 
-        for (int i = model.jointRegressor.cols()-1; i >= 0; --i) {
+        for (int i = model.jointRegressor.cols()-1; i > 0; --i) {
             jointPos.col(i).noalias() -= jointPos.col(model.parent[i]);
         }
         /** END of shape update, BEGIN pose update */
