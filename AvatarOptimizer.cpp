@@ -980,7 +980,7 @@ namespace ark {
 
         ceres::Solver::Options options;
         options.linear_solver_type = ceres::LinearSolverType::DENSE_NORMAL_CHOLESKY;
-        options.trust_region_strategy_type = ceres::DOGLEG;
+        options.trust_region_strategy_type = ceres::TrustRegionStrategyType::LEVENBERG_MARQUARDT;
         //options.preconditioner_type = ceres::PreconditionerType::CLUSTER_JACOBI;
         //options.dogleg_type = ceres::DoglegType::SUBSPACE_DOGLEG;
         options.initial_trust_region_radius = 1e4;

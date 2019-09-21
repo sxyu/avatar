@@ -29,8 +29,8 @@ int main(int argc, char** argv) {
     desc.add_options()
         ("help", "produce help message")
         (",j", po::value<int>(&numThreads)->default_value(boost::thread::hardware_concurrency()), "Number of threads")
-        (",i", po::value<int>(&iters)->default_value(2), "Number of iterations to run")
-        ("betapose", po::value<double>(&betaPose)->default_value(0.02), "Cost function weight betaPose")
+        (",i", po::value<int>(&iters)->default_value(100), "Number of iterations to run")
+        ("betapose", po::value<double>(&betaPose)->default_value(0.1), "Cost function weight betaPose")
         ("betashape", po::value<double>(&betaShape)->default_value(0.8), "Cost function weight betaShape")
     ;
 
