@@ -43,8 +43,8 @@ namespace ark {
         // leading constants
         Eigen::VectorXd consts, consts_log;
         // cholesky decomposition of cov: cov = cov_cho * cov_cho^T
-        mutable std::vector<Eigen::MatrixXd, Eigen::aligned_allocator<Eigen::Matrix3d> > cov_cho;
-        // cholesky decomposition of inverse: cov^-1 = prec_cho * covi_cho^T
-        mutable std::vector<Eigen::MatrixXd, Eigen::aligned_allocator<Eigen::Matrix3d> > prec_cho;
+        mutable std::vector<Eigen::MatrixXd, Eigen::aligned_allocator<Eigen::MatrixXd> > cov_cho;
+        // cholesky decomposition of inverse: cov^-1 = prec_cho * prec_cho^T
+        mutable std::vector<Eigen::MatrixXd, Eigen::aligned_allocator<Eigen::MatrixXd> > prec_cho;
     };
 }  // namespace ark

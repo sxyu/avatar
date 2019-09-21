@@ -173,7 +173,7 @@ namespace ark {
         Eigen::Matrix<double, 3, Eigen::Dynamic> getSmplJoints() const;
 
         /** Undeformed local position of each joint (ADVANCED) */
-        std::vector<Eigen::Vector3d, Eigen::aligned_allocator<Eigen::Quaterniond> > refPos; 
+        std::vector<Eigen::Vector3d, Eigen::aligned_allocator<Eigen::Vector3d> > refPos; 
 
     private:
         /** Helper for initializing a frame. Takes in translation and rotation
