@@ -74,10 +74,11 @@ int main(int argc, char** argv) {
     Avatar ava(model);
     
     Eigen::Vector3d pos;
-    pos.x() = random_util::uniform(-1.0, 1.0);
-    pos.y() = random_util::uniform(-0.5, 0.5);
-    pos.z() = random_util::uniform(2.2, 4.5);
-    ava.randomize();
+    // pos.x() = random_util::uniform(-1.0, 1.0);
+    // pos.y() = random_util::uniform(-0.5, 0.5);
+    // pos.z() = random_util::uniform(2.2, 4.5);
+    pos.z() = 2.0; 
+    // ava.randomize();
     //ava.r[0] = Eigen::AngleAxisd(M_PI, Eigen::Vector3d(0.,1.,0.));
     //ava.r[ark::SmplJoint::R_SHOULDER] = Eigen::AngleAxisd(M_PI/6, Eigen::Vector3d(0.,1.,0.));
     ava.p = pos;
@@ -126,6 +127,7 @@ int main(int argc, char** argv) {
         out[1] = rho * cos(phi);
         out[2] = rho * sin(phi) * sin(theta);
     };
+    /*
     for (int i = 0; i < ava.model.numJoints(); ++i) {
         double theta = random_util::uniform(0, 2 * M_PI);
         double phi   = random_util::uniform(-M_PI/2, M_PI/2);
@@ -135,8 +137,10 @@ int main(int argc, char** argv) {
         Eigen::AngleAxisd aa_perturb(angle_perturb, axis_perturb);
         ava2.r[i] *= aa_perturb.toRotationMatrix();
     }
+    */
     ava2.p = ava.p;
     ava2.w.setZero();
+    ava2.w[0] = -2.5;
     //ava2.r[0] = Eigen::AngleAxisd(M_PI, Eigen::Vector3d(0.,1.,0.));
     //ava2.r[ark::SmplJoint::R_SHOULDER] = Eigen::AngleAxisd(M_PI/6, Eigen::Vector3d(0.,1.,0.));
     ava2.update();
