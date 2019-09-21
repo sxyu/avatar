@@ -26,7 +26,7 @@ namespace ark {
         std::vector<Eigen::Quaterniond, Eigen::aligned_allocator<Eigen::Quaterniond> > r;
 
         /** Cost function component weights */
-        double betaPose = 0.1, betaShape = 0.1, betaJoints = 0.2;
+        double betaPose = 0.1, betaShape = 1.0, betaJoints = 0.2;
 
         /** The avatar we are optimizing */
         Avatar& ava;

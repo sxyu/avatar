@@ -20,7 +20,7 @@ int main(int argc, char** argv) {
 
     std::string intrinPath;
     int numThreads, iters;
-    double betaPose;
+    double betaPose, betaShape;
     cv::Size size;
 
     po::options_description desc("Option arguments");
@@ -30,7 +30,8 @@ int main(int argc, char** argv) {
         ("help", "produce help message")
         (",j", po::value<int>(&numThreads)->default_value(boost::thread::hardware_concurrency()), "Number of threads")
         (",i", po::value<int>(&iters)->default_value(2), "Number of iterations to run")
-        ("betapose", po::value<double>(&betaPose)->default_value(0.1), "Cost function weight betaPose")
+        ("betapose", po::value<double>(&betaPose)->default_value(0.02), "Cost function weight betaPose")
+        ("betashape", po::value<double>(&betaShape)->default_value(0.8), "Cost function weight betaShape")
     ;
 
     descPositional.add_options()
@@ -74,11 +75,11 @@ int main(int argc, char** argv) {
     Avatar ava(model);
     
     Eigen::Vector3d pos;
-    // pos.x() = random_util::uniform(-1.0, 1.0);
-    // pos.y() = random_util::uniform(-0.5, 0.5);
-    // pos.z() = random_util::uniform(2.2, 4.5);
-    pos.z() = 2.0; 
-    // ava.randomize();
+    pos.x() = random_util::uniform(-1.0, 1.0);
+    pos.y() = random_util::uniform(-0.5, 0.5);
+    pos.z() = random_util::uniform(2.2, 4.5);
+    // pos.z() = 2.0;
+    ava.randomize();
     //ava.r[0] = Eigen::AngleAxisd(M_PI, Eigen::Vector3d(0.,1.,0.));
     //ava.r[ark::SmplJoint::R_SHOULDER] = Eigen::AngleAxisd(M_PI/6, Eigen::Vector3d(0.,1.,0.));
     ava.p = pos;
@@ -127,7 +128,6 @@ int main(int argc, char** argv) {
         out[1] = rho * cos(phi);
         out[2] = rho * sin(phi) * sin(theta);
     };
-    /*
     for (int i = 0; i < ava.model.numJoints(); ++i) {
         double theta = random_util::uniform(0, 2 * M_PI);
         double phi   = random_util::uniform(-M_PI/2, M_PI/2);
@@ -137,7 +137,6 @@ int main(int argc, char** argv) {
         Eigen::AngleAxisd aa_perturb(angle_perturb, axis_perturb);
         ava2.r[i] *= aa_perturb.toRotationMatrix();
     }
-    */
     ava2.p = ava.p;
     ava2.w.setZero();
     ava2.w[0] = -2.5;
@@ -147,6 +146,7 @@ int main(int argc, char** argv) {
 
     AvatarOptimizer optim(ava2, intrin, size);
     optim.betaPose = betaPose;
+    optim.betaShape = betaShape;
     optim.optimize(dataCloud, iters, numThreads);
 
     ava2.update();

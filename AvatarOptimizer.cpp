@@ -19,7 +19,7 @@
 #define PROFILE(x) do{printf("%s: %f ms\n", #x, std::chrono::duration<double, std::milli>(std::chrono::high_resolution_clock::now() - start).count()); start = std::chrono::high_resolution_clock::now(); }while(false)
 
 // Uncomment below line to compare analytic diff results to auto diff
-#define TEST_COMPARE_AUTO_DIFF
+// #define TEST_COMPARE_AUTO_DIFF
 
 namespace nanoflann {
     /// KD-tree adaptor for working with data directly stored in a column-major Eigen Matrix, without duplicating the data storage.
@@ -179,12 +179,15 @@ namespace ark {
                     }
 
                     for (int i = 0; i < ava.model.numShapeKeys(); ++i) {
+                        Eigen::MatrixXd::Scalar d;
                         Eigen::Map<const CloudType> keyCloud(ava.model.keyClouds.data() + i * ava.model.numPoints() * 3,
                                 3, ava.model.numPoints());
                         for (int j = 0; j < ava.model.numJoints(); ++j) {
                             S[j].col(i).noalias() = keyCloud * ava.model.jointRegressor.col(j);
-                            if (j) Sp[j].col(i).noalias() = S[j] - S[ava.model.parent[j]];
                         }
+                    }
+                    for (int j = 1; j < ava.model.numJoints(); ++j) {
+                        if (j) Sp[j].noalias() = S[j] - S[ava.model.parent[j]];
                     }
                     Sp[0].setZero();
                     H[0].setZero();
@@ -563,6 +566,34 @@ namespace ark {
             const int nSmplJoints;
         };
 
+        /** Ceres analytic derivative cost function for shape prior error
+         *  (This is extremely simple, just the squared l2-norm of w!) */
+        struct AvatarShapePriorCostFunctor : ceres::CostFunction {
+            AvatarShapePriorCostFunctor(int num_shape_keys, double beta_shape) :
+                numShapeKeys(num_shape_keys), betaShape(beta_shape) {
+                set_num_residuals(numShapeKeys); // 1 for each shape key
+                std::vector<ceres::int32> * paramBlockSizes = mutable_parameter_block_sizes();
+                paramBlockSizes->push_back(numShapeKeys); // 1 for each shape key
+            }
+
+            bool Evaluate(double const* const* parameters,
+                          double* residuals,
+                          double** jacobians) const final {
+                Eigen::Map<Eigen::VectorXd> resid(residuals, numShapeKeys);
+                Eigen::Map<const Eigen::VectorXd> w(parameters[0], numShapeKeys);
+                resid.noalias() = w * betaShape;
+                if (jacobians != nullptr) {
+                    if (jacobians[0] != nullptr) {
+                        Eigen::Map<Eigen::MatrixXd> J(jacobians[0], numShapeKeys, numShapeKeys);
+                        J.noalias() = Eigen::MatrixXd::Identity(numShapeKeys, numShapeKeys) * betaShape;
+                    }
+                }
+                return true;
+            }
+            const int numShapeKeys;
+            const double betaShape;
+        };
+
 #ifdef TEST_COMPARE_AUTO_DIFF
         /** Auto diff cost function w/ derivative for Ceres
          *  (Extremely poorly optimized, used for checking correctness of analytic derivative) */
@@ -591,8 +622,9 @@ namespace ark {
 
                 Eigen::Matrix<T, 3, Eigen::Dynamic> jointPos =
                     cloud * commonData.ava.model.jointRegressor.cast<T>();
-                cloud.colwise() -= jointPos.col(0);
-                jointPos.colwise() -= jointPos.col(0);
+                Eigen::Matrix<T, 3, 1> offset = jointPos.col(0);
+                cloud.colwise() -= offset;
+                jointPos.colwise() -= offset;
 
                 VecMap resid(residual);
                 resid.setZero();
@@ -1043,6 +1075,9 @@ namespace ark {
             if (betaPose > 0.) {
                 problem.AddResidualBlock(new AvatarPosePriorCostFunctor(common), NULL, posePriorParams);
             }
+            if (betaShape > 0.) {
+                problem.AddResidualBlock(new AvatarShapePriorCostFunctor(ava.model.numShapeKeys(), betaShape), NULL, ava.w.data());
+            }
             PROFILE(>> Construct problem: residual blocks);
 
             debugVisualize(viewer, data_cloud, correspondences, pointVisible, common);
@@ -1064,6 +1099,7 @@ namespace ark {
             }
             ava.update();
             PROFILE(>> Finish);
+            std::cout << ava.w.transpose() << "\n";
 
             /*
             // This block shows the value of each residual
@@ -1162,6 +1198,9 @@ namespace ark {
             if (betaPose > 0.) {
                 problem.AddResidualBlock(new AvatarPosePriorCostFunctor(common), NULL, posePriorParams);
             }
+            if (betaShape > 0.) {
+                problem.AddResidualBlock(new AvatarShapePriorCostFunctor(ava.model.numShapeKeys(), betaShape), NULL, ava.w.data());
+            }
             PROFILE(>> Construct problem: residual blocks);
 
             // debugVisualize(viewer, data_cloud, correspondences, pointVisible, common);
@@ -1182,7 +1221,7 @@ namespace ark {
                 ava.r[i].noalias() = r[i].toRotationMatrix();
             }
             ava.update();
-            PROFILE(>> Finish);
+            PROFILE(>> Finish align);
 
             /*
             // This block shows the value of each residual
