@@ -499,7 +499,7 @@ namespace ark {
                 set_num_residuals(3);
                 auto& cache = common_data.caches[cache_id];
 
-                std::vector<ceres::int32> * paramBlockSizes = mutable_parameter_block_sizes();
+                std::vector<int> * paramBlockSizes = mutable_parameter_block_sizes();
                 paramBlockSizes->push_back(3); // Root position
                 for (size_t i = 0; i < cache.commonData.ancestor[cache.pointId].size(); ++i) {
                     paramBlockSizes->push_back(4); // Add rotation block for each ancestor
@@ -527,7 +527,7 @@ namespace ark {
                 : commonData(common_data), posePrior(commonData.ava.model.posePrior),
                   nSmplJoints(commonData.ava.model.numJoints() - 1) {
                 set_num_residuals(nSmplJoints * 3 + 1); // 3 for each joint + 1 extra
-                std::vector<ceres::int32> * paramBlockSizes = mutable_parameter_block_sizes();
+                std::vector<int> * paramBlockSizes = mutable_parameter_block_sizes();
                 for (int i = 0; i < nSmplJoints; ++i) {
                     paramBlockSizes->push_back(4); // Add rotation block for each non-root joint
                 }
@@ -572,7 +572,7 @@ namespace ark {
             AvatarShapePriorCostFunctor(int num_shape_keys, double beta_shape) :
                 numShapeKeys(num_shape_keys), betaShape(beta_shape) {
                 set_num_residuals(numShapeKeys); // 1 for each shape key
-                std::vector<ceres::int32> * paramBlockSizes = mutable_parameter_block_sizes();
+                std::vector<int> * paramBlockSizes = mutable_parameter_block_sizes();
                 paramBlockSizes->push_back(numShapeKeys); // 1 for each shape key
             }
 
