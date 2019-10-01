@@ -204,6 +204,9 @@ namespace ark {
          *  rest are rotations as quaternions */
         void poseAvatar(Avatar& ava, size_t frame_id) const;
 
+        /** Preload entire file into memory */
+        void preload();
+
         /** Map subsequence name to start frame number */
         std::map<std::string, size_t> subsequences;
 
@@ -215,5 +218,10 @@ namespace ark {
 
         /** Path to sequence file */
         std::string sequencePath;
+    private:
+        /** Preloaded data file */
+        Eigen::MatrixXd data;
+        /** Whether data is preloaded */
+        bool preloaded = false;
     };
 }

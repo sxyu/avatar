@@ -21,7 +21,7 @@
 namespace {
 using namespace ark;
 
-void run(int num_threads, int num_to_gen, std::string out_path, const cv::Size& image_size, const CameraIntrin& intrin, int starting_number, bool overwrite)
+void run(int num_threads, int num_to_gen, std::string out_path, const cv::Size& image_size, const CameraIntrin& intrin, int starting_number, bool overwrite, bool preload)
 {
     // Load first joint assignments
     using boost::filesystem::path;
@@ -62,6 +62,17 @@ void run(int num_threads, int num_to_gen, std::string out_path, const cv::Size& 
     }
 
     const AvatarModel model;
+    AvatarPoseSequence poseSequence;
+    if (poseSequence.numFrames) {
+        std::cerr << "Using mocap sequence with " << poseSequence.numFrames << " frames to generate poses\n";
+        if (preload) {
+            std::cerr << "Pre-loading sequence...\n";
+            poseSequence.preload();
+            std::cerr << "Pre-loading done\n";
+        }
+    } else{
+        std::cerr << "WARNING: no mocap pose sequence found, will fallback to GMM to generate poses\n";
+    }
 
     auto worker = [&]() {
         Avatar ava(model);
@@ -74,11 +85,6 @@ void run(int num_threads, int num_to_gen, std::string out_path, const cv::Size& 
             return;
         }
 
-        AvatarPoseSequence poseSequence;
-        if (!poseSequence.numFrames) {
-            std::cerr << "WARNING: no mocap pose sequence found, will fallback to GMM to generate poses\n";
-        }
-
         while(true) {
             int i;
             if (!que.pop(i)) break;
@@ -86,7 +92,8 @@ void run(int num_threads, int num_to_gen, std::string out_path, const cv::Size& 
             ss_img_id << std::setw(8) << std::setfill('0') << std::to_string(i);
 
             if (poseSequence.numFrames) {
-                poseSequence.poseAvatar(ava, random_util::randint<size_t>(0, poseSequence.numFrames - 1));
+                // random_util::randint<size_t>(0, poseSequence.numFrames - 1)
+                poseSequence.poseAvatar(ava, i % poseSequence.numFrames);
                 ava.r[0].setIdentity();
                 ava.randomize(false, true, true);
             } else {
@@ -162,15 +169,16 @@ int main(int argc, char** argv) {
 
     std::string outPath, intrinPath;
     int startingNumber, numToGen, numThreads;
-    bool overwrite;
+    bool overwrite, preload;
     cv::Size size;
 
     po::options_description desc("Option arguments");
-    po::options_description descPositional("OpenARK Synthetic Avatar Depth Image Dataset Generator (c) Alex Yu 2019\nPosition arguments");
+    po::options_description descPositional("OpenARK Synthetic Avatar Depth Image Dataset Generator v0.1b (c) Alex Yu 2019\nPosition arguments");
     po::options_description descCombined("");
     desc.add_options()
         ("help", "produce help message")
         ("overwrite,o", po::bool_switch(&overwrite), "If specified, overwrites existing files. Else, skips over them.")
+        ("preload,p", po::bool_switch(&preload), "If specified, pre-loads mocap sequence (if available); WARNING: may take > 5 GB of memory.")
         (",j", po::value<int>(&numThreads)->default_value(boost::thread::hardware_concurrency()), "Number of threads")
     ;
 
@@ -237,6 +245,6 @@ int main(int argc, char** argv) {
     // viewer->spin();
 
     run(numThreads, numToGen, outPath, size, intrin,
-           startingNumber, overwrite);
+           startingNumber, overwrite, preload);
     return 0;
 }

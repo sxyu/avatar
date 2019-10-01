@@ -112,7 +112,7 @@ set(
 set(
   SOURCES
   Avatar.cpp 
-  AvatarOptimizer.cpp 
+  # AvatarOptimizer.cpp
   Calibration.cpp 
   GaussianMixture.cpp 
   Util.cpp 
@@ -152,10 +152,10 @@ set_target_properties( ${SYNTH_NAME} PROPERTIES OUTPUT_NAME ${OUTPUT_NAME} )
 target_link_libraries( ${SYNTH_NAME} ${DEPENDENCIES} ${LIB_NAME} )
 set_target_properties( ${SYNTH_NAME} PROPERTIES COMPILE_FLAGS ${TARGET_COMPILE_FLAGS} )
 
-add_executable( ${OPTIM_NAME} optim.cpp )
-target_include_directories( ${OPTIM_NAME} PRIVATE ${INCLUDE_DIR} )
-target_link_libraries( ${OPTIM_NAME} ${DEPENDENCIES} ${LIB_NAME} )
-set_target_properties( ${OPTIM_NAME} PROPERTIES COMPILE_FLAGS ${TARGET_COMPILE_FLAGS} )
+# add_executable( ${OPTIM_NAME} optim.cpp )
+# target_include_directories( ${OPTIM_NAME} PRIVATE ${INCLUDE_DIR} )
+# target_link_libraries( ${OPTIM_NAME} ${DEPENDENCIES} ${LIB_NAME} )
+# set_target_properties( ${OPTIM_NAME} PROPERTIES COMPILE_FLAGS ${TARGET_COMPILE_FLAGS} )
 
 add_executable( scratch scratch.cpp )
 target_include_directories( scratch PRIVATE ${INCLUDE_DIR} )

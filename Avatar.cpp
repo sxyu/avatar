@@ -468,6 +468,7 @@ namespace ark {
     }
 
     Eigen::VectorXd AvatarPoseSequence::getFrame(size_t frame_id) const {
+        if (preloaded) return data.col(frame_id);
         std::ifstream ifs(sequencePath, std::ios::in | std::ios::binary);
         ifs.seekg(frame_id * frameSize * sizeof(double), std::ios_base::beg);
         Eigen::VectorXd result(frameSize);
@@ -637,7 +638,7 @@ namespace ark {
         /** units to increase shape key 0 by to widen the avatar by approximately 1 meter */
         const double PC1_DIST_FACT = 32.0;
         w[0] = baseScale * PC1_DIST_FACT;
-        if (isnan(w[0])) w[0] = 1.5;
+        if (std::isnan(w[0])) w[0] = 1.5;
 
         for (int i = 1; i < pos.cols(); ++i) {
             rotTrans[i] = rotTrans[model.parent[i]];
@@ -805,12 +806,30 @@ namespace ark {
     }
 
     void AvatarPoseSequence::poseAvatar(Avatar& ava, size_t frame_id) const {
-        Eigen::VectorXd frameData = getFrame(frame_id);
-        ava.p = frameData.head<3>();
-        Eigen::Quaterniond q;
-        for (int i = 0; i < ava.r.size(); ++i) { 
-            q.coeffs().noalias() = frameData.segment<4>(i * 4 + 3);
-            ava.r[i].noalias() = q.toRotationMatrix();
+        if (preloaded) {
+            auto frameData = data.col(frame_id);
+            ava.p = frameData.head<3>();
+            Eigen::Quaterniond q;
+            for (int i = 0; i < ava.r.size(); ++i) { 
+                q.coeffs().noalias() = frameData.segment<4>(i * 4 + 3);
+                ava.r[i].noalias() = q.toRotationMatrix();
+            }
+        } else{
+            Eigen::VectorXd frameData = getFrame(frame_id);
+            ava.p = frameData.head<3>();
+            Eigen::Quaterniond q;
+            for (int i = 0; i < ava.r.size(); ++i) { 
+                q.coeffs().noalias() = frameData.segment<4>(i * 4 + 3);
+                ava.r[i].noalias() = q.toRotationMatrix();
+            }
         }
+    }
+
+    void AvatarPoseSequence::preload() {
+        data.resize(frameSize, numFrames);
+        std::ifstream ifs(sequencePath, std::ios::in | std::ios::binary);
+        ifs.read(reinterpret_cast<char*>(data.data()),
+                 numFrames * frameSize * sizeof(double));
+        preloaded = true;
     }
 }
