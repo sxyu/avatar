@@ -124,14 +124,22 @@ namespace ark {
     namespace random_util {
         float uniform(float min_inc, float max_exc) {
             thread_local static std::mt19937 rg(std::random_device{}());
-            std::uniform_real_distribution<float> uniform(min_inc, max_exc); 
-            return uniform(rg); 
+            return uniform(rg, min_inc, max_exc);
         }
 
         float randn(float mean, float variance) {
             thread_local static std::mt19937 rg(std::random_device{}());
-            std::normal_distribution<float> normal(mean, variance); 
-            return normal(rg); 
+            return randn(rg, mean, variance);
+        }
+
+        float uniform(std::mt19937& rg, float min_inc, float max_exc) {
+            std::uniform_real_distribution<float> uniform(min_inc, max_exc);
+            return uniform(rg);
+        }
+
+        float randn(std::mt19937& rg, float mean, float variance) {
+            std::normal_distribution<float> normal(mean, variance);
+            return normal(rg);
         }
     }
 }

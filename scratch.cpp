@@ -96,6 +96,7 @@ void __avatarGUI()
 
             for (int i = 0; i < N_CTRL; ++i) {
                 double angle = (ctrlw[i] - 1000) / 1000.0 * M_PI;
+                if (CTRL_JNT[i] >= ava.model.numJoints()) continue;
                 if (angle == 0) ava.r[CTRL_JNT[i]].setIdentity();
                 else ava.r[CTRL_JNT[i]] = Eigen::AngleAxisd(angle, CTRL_AXIS[i]).toRotationMatrix();
             }

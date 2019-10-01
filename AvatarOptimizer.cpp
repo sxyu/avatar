@@ -19,7 +19,7 @@
 #define PROFILE(x) do{printf("%s: %f ms\n", #x, std::chrono::duration<double, std::milli>(std::chrono::high_resolution_clock::now() - start).count()); start = std::chrono::high_resolution_clock::now(); }while(false)
 
 // Uncomment below line to compare analytic diff results to auto diff
-// #define TEST_COMPARE_AUTO_DIFF
+//#define TEST_COMPARE_AUTO_DIFF
 
 namespace nanoflann {
     /// KD-tree adaptor for working with data directly stored in a column-major Eigen Matrix, without duplicating the data storage.
@@ -178,12 +178,18 @@ namespace ark {
                         H[j].resize(3, ava.model.numShapeKeys());
                     }
 
-                    for (int i = 0; i < ava.model.numShapeKeys(); ++i) {
-                        Eigen::MatrixXd::Scalar d;
-                        Eigen::Map<const CloudType> keyCloud(ava.model.keyClouds.data() + i * ava.model.numPoints() * 3,
-                                3, ava.model.numPoints());
+                    if (ava.model.useJointShapeRegressor) {
                         for (int j = 0; j < ava.model.numJoints(); ++j) {
-                            S[j].col(i).noalias() = keyCloud * ava.model.jointRegressor.col(j);
+                            S[j].noalias() = ava.model.jointShapeReg.middleRows<3>(3 * j);
+                        }
+                    } else {
+                        for (int i = 0; i < ava.model.numShapeKeys(); ++i) {
+                            Eigen::MatrixXd::Scalar d;
+                            Eigen::Map<const CloudType> keyCloud(ava.model.keyClouds.data() + i * ava.model.numPoints() * 3,
+                                    3, ava.model.numPoints());
+                            for (int j = 0; j < ava.model.numJoints(); ++j) {
+                                S[j].col(i).noalias() = keyCloud * ava.model.jointRegressor.col(j);
+                            }
                         }
                     }
                     for (int j = 1; j < ava.model.numJoints(); ++j) {
@@ -201,9 +207,15 @@ namespace ark {
                 /** Apply shape keys */
                 shapedCloudVec.noalias() = ava.model.keyClouds * ava.w + ava.model.baseCloud; 
 
-                /** Apply joint regressor */
+                /** Apply joint [shape] regressor */
                 // TODO: use dense joint regressor with compressed cloud
-                jointPosInit.noalias() = shapedCloud * ava.model.jointRegressor;
+                if (ava.model.useJointShapeRegressor) {
+                    jointPosInit.resize(3, ava.model.numJoints());
+                    Eigen::Map<Eigen::VectorXd> jointPosVec(jointPosInit.data(), 3 * ava.model.numJoints());
+                    jointPosVec.noalias() = ava.model.jointShapeRegBase + ava.model.jointShapeReg * ava.w;
+                } else {
+                    jointPosInit.noalias() = shapedCloud * ava.model.jointRegressor;
+                }
 
                 /** Ensure root is at origin*/
                 Eigen::Vector3d offset = jointPosInit.col(0);
@@ -401,8 +413,12 @@ namespace ark {
                     for (; i < commonData.ancestor[pointId].size(); ++i) {
                         if (jacobians[i+1] != nullptr) {
                             Eigen::Map<Eigen::Matrix<double, 3, 4, Eigen::RowMajor> > J(jacobians[i+1]);
+#ifdef TEST_COMPARE_AUTO_DIFF
+                            J.noalias() = icpJacobian[i];
+#else
                             J.topLeftCorner<3,3>().noalias() = icpJacobian[i];
                             J.rightCols<1>().setZero();
+#endif
                         }
                     }
                     if (commonData.shape_enabled && jacobians[i + 1] != nullptr) {
@@ -463,7 +479,11 @@ namespace ark {
                             u(0)*v(0) + v(1)*u(1),
                             u(0)*v(1) - v(0)*u(1);
 
-                        icpJacobian[i].noalias() = commonData.R(-1, ava.model.parent[j]) * dRot * commonData.localJacobian[j];
+                        icpJacobian[i].noalias() = commonData.R(-1, ava.model.parent[j]) * dRot
+#ifndef TEST_COMPARE_AUTO_DIFF
+                            * commonData.localJacobian[j]
+#endif
+                            ;
                     }
 
                     if (commonData.shape_enabled) {
@@ -478,9 +498,17 @@ namespace ark {
             }
 
             Eigen::Vector3d resid;
+#ifdef TEST_COMPARE_AUTO_DIFF
+            // For comparing with auto diff, we cannot multiply by the
+            // local param jacobian or result would not be comparable
+            std::vector<Eigen::Matrix<double, 3, 4, Eigen::RowMajor>,
+                        Eigen::aligned_allocator<
+                            Eigen::Matrix<double, 3, 4, Eigen::RowMajor> > > icpJacobian;
+#else
             std::vector<Eigen::Matrix<double, 3, 3, Eigen::RowMajor>,
                         Eigen::aligned_allocator<
                             Eigen::Matrix<double, 3, 3, Eigen::RowMajor> > > icpJacobian;
+#endif
 
             Eigen::Matrix<double, 3, Eigen::Dynamic, Eigen::RowMajor> icpShapeJacobian;
 
@@ -622,6 +650,21 @@ namespace ark {
 
                 Eigen::Matrix<T, 3, Eigen::Dynamic> jointPos =
                     cloud * commonData.ava.model.jointRegressor.cast<T>();
+
+                if (commonData.ava.model.useJointShapeRegressor) {
+                    jointPos.resize(3, commonData.ava.model.numJoints());
+                    Eigen::Map<Eigen::Matrix<T, Eigen::Dynamic, 1> > jointPosVec(jointPos.data(), 3 * commonData.ava.model.numJoints());
+
+                    if (commonData.shape_enabled) {
+                        Eigen::Map<const Eigen::Matrix<T, Eigen::Dynamic, 1> > wMap(params[commonData.ava.model.numJoints() + 1], commonData.ava.model.numShapeKeys(), 1);
+                        jointPosVec.noalias() = commonData.ava.model.jointShapeRegBase.cast<T>() + commonData.ava.model.jointShapeReg.cast<T>() * wMap; 
+                    } else {
+                        jointPosVec.noalias() = commonData.ava.model.jointShapeRegBase.cast<T>() + commonData.ava.model.jointShapeReg.cast<T>() * commonData.ava.w.cast<T>();
+                    }
+                } else {
+                    jointPos.noalias() = cloud * commonData.ava.model.jointRegressor.cast<T>();
+                }
+
                 Eigen::Matrix<T, 3, 1> offset = jointPos.col(0);
                 cloud.colwise() -= offset;
                 jointPos.colwise() -= offset;

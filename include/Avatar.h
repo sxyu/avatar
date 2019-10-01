@@ -53,9 +53,9 @@ namespace ark {
         explicit AvatarModel(const std::string & model_dir = "");
 
         /** Get number of joints */
-        inline int numJoints() const { return jointRegressor.cols(); }
+        inline int numJoints() const { return parent.rows(); }
         /** Get number of skin points */
-        inline int numPoints() const { return jointRegressor.rows(); }
+        inline int numPoints() const { return assignWeights.cols(); }
         /** Get number of shape keys */
         inline int numShapeKeys() const { return keyClouds.cols(); }
         /** Get number of polygon faces */
@@ -96,6 +96,21 @@ namespace ark {
         /** ADVANCED: Joint regressor for recovering joint positions from surface points (num points, num joints) */
         Eigen::SparseMatrix<double> jointRegressor;
 
+        /** ADVANCED: Whether to use the new 'joint shape regressor'
+         *  to regress joints
+         *  else uses the original joint regressor from SMPL */
+        bool useJointShapeRegressor;
+
+        /** ADVANCED: Affine component of joint shape regressor for
+         *  recovering joint positions from shape weights directly
+         *  (num joints * 3) */
+        Eigen::VectorXd jointShapeRegBase;
+
+        /** ADVANCED: Linear transformation component of shape regressor for
+         *  recovering joint positions from shape weights directly
+         *  (num joints * 3, num shapekeys) */
+        Eigen::MatrixXd jointShapeReg;
+
         /** ADVANCED: Assignment weights: weights for point-joints assignments.
          *  Columns are recorded in 'assignment' indices,
          *  see assignStarts below. (num assignments total, num points) */
@@ -128,7 +143,7 @@ namespace ark {
 
         /** Randomize avatar's pose and shape according to PCA (shape) and GMM model (pose). */
         void randomize(bool randomize_pose = true, bool randomize_shape = true,
-                       bool randomize_root_pos_rot = true);
+                       bool randomize_root_pos_rot = true, uint32_t seed = -1);
 
         /** Random pose from mocap. Requires mocap data (avatar/avatar-mocap) to be downloaded. */
         void randomMocapPose();

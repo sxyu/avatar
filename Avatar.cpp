@@ -325,6 +325,7 @@ namespace ark {
         path modelPath = model_dir.empty() ? util::resolveRootPath("data/avatar-model") : model_dir;
         path skelPath = modelPath / "skeleton.txt";
         path jrPath = modelPath / "joint_regressor.txt";
+        path jsrPath = modelPath / "joint_shape_regressor.txt";
         path posePriorPath = modelPath / "pose_prior.txt";
         path meshPath = modelPath / "mesh.txt";
 
@@ -410,19 +411,42 @@ namespace ark {
             std::cerr << "WARNING: no shape key directory found for avatar\n";
         }
 
-        // Load joint regressor
-        std::ifstream jr(jrPath.string());
-        jr >> nJoints;
-
-        jointRegressor = Eigen::SparseMatrix<double>(nPoints, nJoints);
-        jointRegressor.reserve(nJoints * 10);
-        for (int i = 0; i < nJoints; ++i) {
-            int nEntries; jr >> nEntries;
-            int pointIdx; double val;
-            for (int j = 0; j < nEntries; ++j) {
-                jr >> pointIdx >> val;
-                jointRegressor.insert(pointIdx, i) = val;
+        // Load joint regressor / joint shape regressor
+        std::ifstream jsr(jsrPath.string());
+        if (jsr) {
+            int nShapeKeys;
+            jsr >> nShapeKeys;
+            jointShapeRegBase.resize(nJoints * 3);
+            jointShapeReg.resize(nJoints * 3, nShapeKeys);
+            for (int i = 0; i < jointShapeRegBase.rows(); ++i) {
+                jsr >> jointShapeRegBase(i);
             }
+            for (int i = 0; i < jointShapeReg.rows(); ++i) {
+                for (int j = 0; j < jointShapeReg.cols(); ++j) {
+                    jsr >> jointShapeReg(i, j);
+                }
+            }
+            useJointShapeRegressor = true;
+            jsr.close();
+        } else {
+            std::ifstream jr(jrPath.string());
+            jointRegressor = Eigen::SparseMatrix<double>(nPoints, nJoints);
+            if (jr) {
+                jr >> nJoints;
+                jointRegressor.reserve(nJoints * 10);
+                for (int i = 0; i < nJoints; ++i) {
+                    int nEntries; jr >> nEntries;
+                    int pointIdx; double val;
+                    for (int j = 0; j < nEntries; ++j) {
+                        jr >> pointIdx >> val;
+                        jointRegressor.insert(pointIdx, i) = val;
+                    }
+                }
+                jr.close();
+            } else {
+                std::cerr << "WARNING: joint regressor OR joint shape regressor found, model may be inaccurate with nonzero shapekey weights\n";
+            }
+            useJointShapeRegressor = false;
         }
 
         // Maybe load pose prior
@@ -468,14 +492,20 @@ namespace ark {
 
         /** Apply shape keys */
         shapedCloudVec.noalias() = model.keyClouds * w + model.baseCloud; 
+        Eigen::Map<CloudType> shapedCloud(shapedCloudVec.data(), 3, model.numPoints());
 
-        /** Apply joint regressor */
-        Eigen::Map<CloudType> shapedCloud(shapedCloudVec.data(), 3, model.jointRegressor.rows());
-        jointPos.noalias() = shapedCloud * model.jointRegressor;
+        /** Apply joint [shape] regressor */
+        if (model.useJointShapeRegressor) {
+            jointPos.resize(3, model.numJoints());
+            Eigen::Map<Eigen::VectorXd> jointPosVec(jointPos.data(), 3 * model.numJoints());
+            jointPosVec.noalias() = model.jointShapeRegBase + model.jointShapeReg * w;
+        } else {
+            jointPos.noalias() = shapedCloud * model.jointRegressor;
+        }
 
         /** Update joint assignment/position constants */
         size_t j = 0;
-        for (int i = 0; i < model.jointRegressor.cols(); ++i) {
+        for (int i = 0; i < model.numJoints(); ++i) {
             auto col = jointPos.col(i);
             for (auto& assignment : model.assignedPoints[i]) {
                 int idx = assignment.second;
@@ -483,24 +513,24 @@ namespace ark {
             }
         }
 
-        for (int i = model.jointRegressor.cols()-1; i > 0; --i) {
+        for (int i = model.numJoints()-1; i > 0; --i) {
             jointPos.col(i).noalias() -= jointPos.col(model.parent[i]);
         }
         /** END of shape update, BEGIN pose update */
 
         /** Compute each joint's transform */
         //jointRot.clear();
-        jointRot.resize(model.jointRegressor.cols());
+        jointRot.resize(model.numJoints());
         jointRot[0].noalias() = r[0];
 
         jointPos.col(0) = p; /** Add root position to all joints */
-        for (size_t i = 1; i < model.jointRegressor.cols(); ++i) {
+        for (size_t i = 1; i < model.numJoints(); ++i) {
             jointRot[i].noalias() = jointRot[model.parent[i]] * r[i];
             jointPos.col(i) = jointRot[model.parent[i]] * jointPos.col(i) + jointPos.col(model.parent[i]);
         }
 
         /** Compute each point's transform */
-        for (int i = 0; i < model.jointRegressor.cols(); ++i) {
+        for (int i = 0; i < model.numJoints(); ++i) {
             Eigen::Map<CloudType> block(assignVecs.data() + 3 * model.assignStarts[i], 3, model.assignStarts[i+1] - model.assignStarts[i]);
             block = jointRot[i] * block;
             block.colwise() += jointPos.col(i);
@@ -510,11 +540,16 @@ namespace ark {
     }
 
     void Avatar::randomize(bool randomize_pose,
-            bool randomize_shape, bool randomize_root_pos_rot) {
+        bool randomize_shape, bool randomize_root_pos_rot, uint32_t seed) {
+        thread_local static std::mt19937 rg(std::random_device{}());
+        if (~seed) {
+            rg.seed(seed);
+        }
+
         // Shape keys
         if (randomize_shape) {
             for (int i = 0; i < model.numShapeKeys(); ++i) {
-                w(i) = random_util::randn();
+                w(i) = random_util::randn(rg);
             }
         }
 
@@ -533,21 +568,21 @@ namespace ark {
         if (randomize_root_pos_rot) {
             // Root position
             Eigen::Vector3d pos;
-            pos.x() = random_util::uniform(-1.0, 1.0);
-            pos.y() = random_util::uniform(-0.5, 0.5);
-            pos.z() = random_util::uniform(2.2, 4.5);
+            pos.x() = random_util::uniform(rg, -1.0, 1.0);
+            pos.y() = random_util::uniform(rg, -0.5, 0.5);
+            pos.z() = random_util::uniform(rg, 2.2, 4.5);
             p = pos;
 
             // Root rotation
             const Eigen::Vector3d axis_up(0., 1., 0.);
-            double angle_up  = random_util::uniform(-M_PI / 3., M_PI / 3.) + M_PI;
+            double angle_up  = random_util::uniform(rg, -M_PI / 3., M_PI / 3.) + M_PI;
             Eigen::AngleAxisd aa_up(angle_up, axis_up);
 
-            double theta = random_util::uniform(0, 2 * M_PI);
-            double phi   = random_util::uniform(-M_PI/2, M_PI/2);
+            double theta = random_util::uniform(rg, 0, 2 * M_PI);
+            double phi   = random_util::uniform(rg, -M_PI/2, M_PI/2);
             Eigen::Vector3d axis_perturb;
             fromSpherical(1.0, theta, phi, axis_perturb);
-            double angle_perturb = random_util::randn(0.0, 0.2);
+            double angle_perturb = random_util::randn(rg, 0.0, 0.2);
             Eigen::AngleAxisd aa_perturb(angle_perturb, axis_perturb);
 
             r[0] = (aa_perturb * aa_up).toRotationMatrix();

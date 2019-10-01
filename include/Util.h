@@ -76,6 +76,12 @@ namespace ark {
         float uniform(float min_inc = 0., float max_exc = 1.);
 
         /** Gaussian distribution */
-        float randn(float mean = 0, float variance = 1);
+        float randn(float mean = 0, float variance = 1); 
+
+        /** Uniform distribution with provided rng */
+        float uniform(std::mt19937& rg, float min_inc = 0., float max_exc = 1.);
+
+        /** Gaussian distribution with provided rng */
+        float randn(std::mt19937& rg, float mean = 0, float variance = 1);
     } // random_util
 }

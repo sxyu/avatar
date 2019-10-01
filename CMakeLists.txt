@@ -162,6 +162,11 @@ target_include_directories( scratch PRIVATE ${INCLUDE_DIR} )
 target_link_libraries( scratch ${DEPENDENCIES} ${LIB_NAME} )
 set_target_properties( scratch PROPERTIES COMPILE_FLAGS ${TARGET_COMPILE_FLAGS} )
 
+add_executable( smpltrim smpltrim.cpp )
+target_include_directories( smpltrim PRIVATE ${INCLUDE_DIR} )
+target_link_libraries( smpltrim ${DEPENDENCIES} ${LIB_NAME} )
+set_target_properties( smpltrim PROPERTIES COMPILE_FLAGS ${TARGET_COMPILE_FLAGS} )
+
 if ( MSVC )
     set_property(TARGET ${PROJ_NAME} APPEND PROPERTY LINK_FLAGS /DEBUG)
 else ()
