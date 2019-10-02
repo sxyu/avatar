@@ -6,6 +6,9 @@
 #include "opencv2/core.hpp"
 #include <Eigen/Core>
 
+#include "Avatar.h"
+#include "Calibration.h"
+
 namespace ark {
     class RTree {
     public:
@@ -52,6 +55,24 @@ namespace ark {
          *  on the same RTree. */
         void train(const std::string& depth_dir,
                    const std::string& part_mask_dir,
+                   int num_threads = std::thread::hardware_concurrency(),
+                   bool verbose = false,
+                   int num_images = 30000,
+                   int num_points_per_image = 2000,
+                   int num_features = 2000,
+                   int max_probe_offset = 225, 
+                   int min_samples = 100,      // term crit
+                   int max_tree_depth = 20     // term crit 
+                   );
+
+        /** Train directly from avatar by rendering simulated images,
+         * with num_images random images and
+         *  num_points_per_image random pixels from each image.
+         *  Do not call train again while training is on-going
+         *  on the same RTree. */
+        void trainFromAvatar(Avatar& avatar,
+                   CameraIntrin& intrin,
+                   cv::Size& image_size,
                    int num_threads = std::thread::hardware_concurrency(),
                    bool verbose = false,
                    int num_images = 30000,

@@ -169,6 +169,22 @@ target_include_directories( smpltrim PRIVATE ${INCLUDE_DIR} )
 target_link_libraries( smpltrim ${DEPENDENCIES} ${LIB_NAME} )
 set_target_properties( smpltrim PROPERTIES COMPILE_FLAGS ${TARGET_COMPILE_FLAGS} )
 
+# RTree stuff (not well tested)
+add_executable( rtree-train rtree-train.cpp )
+target_include_directories( rtree-train PRIVATE ${INCLUDE_DIR} )
+target_link_libraries( rtree-train ${DEPENDENCIES} ${LIB_NAME} )
+set_target_properties( rtree-train PROPERTIES COMPILE_FLAGS ${TARGET_COMPILE_FLAGS} )
+
+add_executable( rtree-run rtree-run.cpp )
+target_include_directories( rtree-run PRIVATE ${INCLUDE_DIR} )
+target_link_libraries( rtree-run ${DEPENDENCIES} ${LIB_NAME} )
+set_target_properties( rtree-run PROPERTIES COMPILE_FLAGS ${TARGET_COMPILE_FLAGS} )
+
+add_executable( rtree-run-dataset rtree-run-dataset.cpp )
+target_include_directories( rtree-run-dataset PRIVATE ${INCLUDE_DIR} )
+target_link_libraries( rtree-run-dataset ${DEPENDENCIES} ${LIB_NAME} )
+set_target_properties( rtree-run-dataset PROPERTIES COMPILE_FLAGS ${TARGET_COMPILE_FLAGS} )
+
 if ( MSVC )
     set_property(TARGET ${PROJ_NAME} APPEND PROPERTY LINK_FLAGS /DEBUG)
 else ()

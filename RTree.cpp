@@ -12,7 +12,6 @@
 #include "boost/filesystem.hpp"
 
 #include "Util.h"
-#include "Avatar.h"
 #include "AvatarRenderer.h"
 
 #define BEGIN_PROFILE auto _start = std::chrono::high_resolution_clock::now()
@@ -492,7 +491,7 @@ namespace ark {
 
     struct AvatarDataSource {
         AvatarDataSource(Avatar& ava, CameraIntrin& intrin,
-                         cv::Size& image_size,  int num_images)
+                         cv::Size& image_size, int num_images)
             : ava(ava), intrin(intrin), imageSize(image_size), numImages(num_images) { }
 
         int size() const {
@@ -638,6 +637,24 @@ namespace ark {
         nodes.reserve(1 << std::min(max_tree_depth, 22));
         FileDataSource dataSource(depth_dir, part_mask_dir);
         Trainer<FileDataSource> trainer(nodes, leafData, dataSource, numParts);
+        trainer.train(num_images, num_points_per_image, num_features,
+                max_probe_offset, min_samples, max_tree_depth, num_threads, verbose);
+    }
+
+    void RTree::trainFromAvatar(Avatar& avatar,
+                   CameraIntrin& intrin,
+                   cv::Size& image_size,
+                   int num_threads,
+                   bool verbose,
+                   int num_images,
+                   int num_points_per_image,
+                   int num_features,
+                   int max_probe_offset,
+                   int min_samples, 
+                   int max_tree_depth) {
+        nodes.reserve(1 << std::min(max_tree_depth, 22));
+        AvatarDataSource dataSource(avatar, intrin, image_size, num_images);
+        Trainer<AvatarDataSource> trainer(nodes, leafData, dataSource, numParts);
         trainer.train(num_images, num_points_per_image, num_features,
                 max_probe_offset, min_samples, max_tree_depth, num_threads, verbose);
     }
