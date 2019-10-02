@@ -112,7 +112,8 @@ set(
 set(
   SOURCES
   Avatar.cpp 
-  # AvatarOptimizer.cpp
+  RTree.cpp 
+  AvatarOptimizer.cpp
   Calibration.cpp 
   GaussianMixture.cpp 
   Util.cpp 
@@ -128,6 +129,7 @@ set(
   ${INCLUDE_DIR}/Calibration.h
   ${INCLUDE_DIR}/Config.h
   ${INCLUDE_DIR}/GaussianMixture.h
+  ${INCLUDE_DIR}/RTree.h
   ${INCLUDE_DIR}/Util.h
   ${INCLUDE_DIR}/Version.h
   ${INCLUDE_DIR}/ViconSkeleton.h

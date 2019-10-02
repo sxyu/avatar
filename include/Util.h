@@ -72,6 +72,18 @@ namespace ark {
             return z % (hi - lo + 1) + lo;
         }
 
+        template<class T>
+        /** Choose k elements from a vector */
+        std::vector<T> choose(std::vector<T> & source, int k) {
+            std::vector<T> out;
+            for (int j = 0; j < std::min<int>(k, source.size()); ++j) {
+                int r = randint(j, static_cast<int>(source.size()) - 1); 
+                out.push_back(source[r]);
+                std::swap(source[j], source[r]);
+            }   
+            return out;
+        }   
+
         /** Uniform distribution */
         float uniform(float min_inc = 0., float max_exc = 1.);
 
