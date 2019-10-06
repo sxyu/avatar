@@ -10,9 +10,9 @@ constexpr char WIND_NAME[] = "Image";
 }
 
 int main(int argc, char** argv) { 
-    std::string data_path, output_path, intrin_path;
-    bool verbose, preload;
-    int num_threads, num_images, num_points_per_image, num_features, max_probe_offset, min_samples, max_tree_depth, cache_size;
+    std::string data_path, output_path, intrin_path, samples_file;
+    bool verbose, preload, generate_samples_only;
+    int num_threads, num_images, num_points_per_image, num_features, max_probe_offset, min_samples, max_tree_depth, samples_per_feature, cache_size;
     cv::Size size;
 
     namespace po = boost::program_options;
@@ -25,17 +25,25 @@ int main(int argc, char** argv) {
         ("output,o", po::value<std::string>(&output_path)->default_value("output.rtree"), "Output file")
         ("threads,j", po::value<int>(&num_threads)->default_value(std::thread::hardware_concurrency()), "Number of threads")
         ("verbose,v", po::bool_switch(&verbose), "Enable verbose output")
-        ("preload", po::bool_switch(&preload), "Preload avatar sequence (only if using synthetic data generation)")
-        ("images,i", po::value<int>(&num_images)->default_value(1000), "Number of random images to train on")
+        ("preload", po::bool_switch(&preload), "Preload avatar pose sequence in memory to speed up random pose; "
+                                               "may take multiple GBs of RAM, only useful if using synthetic data input")
+        ("images,i", po::value<int>(&num_images)->default_value(1000), "Number of random images to train on; Kinect used 1 million")
         ("intrin_path", po::value<std::string>(&intrin_path)->default_value(""), "Path to camera intrinsics file (default: uses hardcoded K4A intrinsics)")
-        ("pixels,p", po::value<int>(&num_points_per_image)->default_value(2000), "Number of random pixels from each image")
-        ("features,f", po::value<int>(&num_features)->default_value(2000), "Number of random features to try per tree node")
-        ("probe,b", po::value<int>(&max_probe_offset)->default_value(170), "Maximum probe offset for features")
+        ("pixels,p", po::value<int>(&num_points_per_image)->default_value(2000), "Number of random pixels from each image; Kinect used 2000")
+        ("features,f", po::value<int>(&num_features)->default_value(2000), "Number of random features to try per tree node; Kinect used 2000")
+        ("probe,b", po::value<int>(&max_probe_offset)->default_value(170), "Maximum probe offset for random feature generation. "
+                            "Noted in Kinect paper that cost 'levels off around >=129' but hyperparameter value not provided")
         ("min_samples,m", po::value<int>(&min_samples)->default_value(1), "Minimum number of samples of a child to declare current node a leaf")
-        ("depth,d", po::value<int>(&max_tree_depth)->default_value(20), "Maximum tree depth")
-        ("width", po::value<int>(&size.width)->default_value(1280), "Width of generated images")
-        ("height", po::value<int>(&size.height)->default_value(720), "Height of generated imaes")
+        ("samples_per_feature", po::value<int>(&samples_per_feature)->default_value(60),
+          "Maximum number of samples (may be +-1 in practice) to optimize feature score threshold over for each feature; "
+          "higher is more optimal but slower. Kinect used 50")
+        ("depth,d", po::value<int>(&max_tree_depth)->default_value(20), "Maximum tree depth; Kinect used 20")
+        ("width", po::value<int>(&size.width)->default_value(1280), "Width of generated images; only useful if using synthetic data input")
+        ("height", po::value<int>(&size.height)->default_value(720), "Height of generated imaes; only useful if using synthetic data input")
         ("cache_size,c", po::value<int>(&cache_size)->default_value(3000), "Max number of images in cache during training")
+        ("samples_file,s", po::value<std::string>(&samples_file)->default_value(""), "Pre-computed samples file to use for training, "
+                             "or if -g is specified, to write to. This speeds up the initial training process.")
+        ("gen_samples,g", po::bool_switch(&generate_samples_only), "If specified, skips training and only generates samples file (must specify -s=PATH)")
     ;
 
     descPositional.add_options()
@@ -102,10 +110,11 @@ int main(int argc, char** argv) {
             intrin.cy = 366.992;
         }
         rtree.trainFromAvatar(model, poseSequence, intrin, size, num_threads, verbose, num_images, num_points_per_image,
-                num_features, max_probe_offset, min_samples, max_tree_depth, ark::part_map::SMPL_JOINT_TO_PART_MAP, cache_size);
+                num_features, max_probe_offset, min_samples, max_tree_depth, samples_per_feature, ark::part_map::SMPL_JOINT_TO_PART_MAP, cache_size,
+                samples_file, generate_samples_only);
     } else {
         rtree.train(data_path + "/depth_exr", data_path + "/part_mask", num_threads, verbose, num_images, num_points_per_image,
-                num_features, max_probe_offset, min_samples, max_tree_depth, cache_size);
+                num_features, max_probe_offset, min_samples, max_tree_depth, samples_per_feature, cache_size, samples_file, generate_samples_only);
     }
     rtree.exportFile(output_path);
 

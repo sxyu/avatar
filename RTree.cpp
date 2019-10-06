@@ -8,8 +8,9 @@
 #include <mutex>
 #include <iomanip>
 #include <iostream>
-#include "opencv2/imgcodecs.hpp"
-#include "boost/filesystem.hpp"
+#include <opencv2/imgcodecs.hpp>
+#include <boost/filesystem.hpp>
+#include <Eigen/StdVector>
 
 #include "Util.h"
 #include "AvatarRenderer.h"
@@ -31,13 +32,12 @@ namespace {
 
     // Get depth at point in depth image, or return BACKGROUND_DEPTH
     // if in the background OR out of bounds
-    inline float getDepth(const cv::Mat& depth_image, const Eigen::Vector2i& point) {
-        static const float BACKGROUND_DEPTH = 20.f;
+    inline float getDepth(const cv::Mat& depth_image, const ark::RTree::Vec2i& point) {
         if (point.y() < 0 || point.x() < 0 ||
                 point.y() >= depth_image.rows || point.x() >= depth_image.cols)
-            return BACKGROUND_DEPTH;
+            return ark::RTree::BACKGROUND_DEPTH;
         float depth = depth_image.at<float>(point.y(), point.x());
-        if (depth <= 0.0) return BACKGROUND_DEPTH;
+        if (depth <= 0.0) return ark::RTree::BACKGROUND_DEPTH;
         return depth;
     }
 
@@ -51,8 +51,8 @@ namespace {
             // Add feature u,v and round
             Eigen::Vector2f ut = u / sampleDepth, vt = v / sampleDepth;
             ark::RTree::Vec2i uti, vti;
-            uti << static_cast<int>(std::round(ut.x())), static_cast<int>(std::round(ut.y()));
-            vti << static_cast<int>(std::round(vt.x())), static_cast<int>(std::round(vt.y()));
+            uti << static_cast<int16_t>(std::round(ut.x())), static_cast<int16_t>(std::round(ut.y()));
+            vti << static_cast<int16_t>(std::round(vt.x())), static_cast<int16_t>(std::round(vt.y()));
             uti += pix; vti += pix;
             
             return (getDepth(depth_image, uti) - getDepth(depth_image, vti));
@@ -60,6 +60,8 @@ namespace {
 }
 
 namespace ark {
+    const float RTree::BACKGROUND_DEPTH = 20.f;
+
     RTree::RNode::RNode() : leafid(-1) {};
     RTree::RNode::RNode(const Vec2& u, const Vec2& v, float thresh) :
                 u(u), v(v), thresh(thresh), leafid(-1) {}
@@ -80,21 +82,31 @@ namespace ark {
         int index;
         // Pixel position
         RTree::Vec2i pix; 
+        EIGEN_MAKE_ALIGNED_OPERATOR_NEW
     }; 
+    using SampleVec = std::vector<Sample, Eigen::aligned_allocator<Sample> >;
 
     template<class DataSource>
+    /** Responsible for handling data loading from abstract data source
+     *  Interface: dataLoader.get(sample): get (depth, part mask) images for a sample
+     *             dataLoader.preload(samples, a, b, numThreads): preload images for samples if possible */
     struct DataLoader {
         DataSource& dataSource;
         DataLoader(DataSource& data_source, int max_images_loaded) : dataSource(data_source), maxImagesLoaded(max_images_loaded) {}
 
-        bool preload(const std::vector<Sample>& samples, int a, int b, int numThreads) {
+        /** Precondition: samples must be sorted by image index on [a, ..., b-1] */
+        bool preload(const SampleVec& samples, int a, int b, int numThreads) {
             std::vector<int> images;
-            for (const auto& sample : samples) {
-                images.push_back(sample.index);
+            images.push_back(samples[a].index);
+            for (int i = a + 1; i < b; ++i) {
+                if (samples[i].index != images.back()) {
+                    images.push_back(samples[i].index);
+                }
             }
-            std::sort(images.begin(), images.end());
             images.resize(std::unique(images.begin(), images.end()) - images.begin());
             if (images.size() > maxImagesLoaded) {
+                std::cerr << "INFO: Number of images too large (" << images.size() <<
+                    " > " << maxImagesLoaded << "), not preloading\n";
                 return false;
             }
             
@@ -147,7 +159,7 @@ namespace ark {
             return true;
         }
 
-        std::array<cv::Mat, 2> get(const Sample& sample) const {
+        const std::array<cv::Mat, 2>& get(const Sample& sample) const {
             int iidx = sample.index >= imageIdx.size() ? -1 : imageIdx[sample.index];
             if (iidx < 0) {
                 cv::Mat im0, im1;
@@ -188,15 +200,20 @@ namespace ark {
                 int max_images_loaded)
             : nodes(nodes), leafData(leaf_data),
               dataLoader(data_source, max_images_loaded), numParts(num_parts) {
-          }
+        }
 
         void train(int num_images, int num_points_per_image, int num_features,
                    int max_probe_offset, int min_samples, int max_tree_depth,
-                   int num_threads, bool verbose) {
+                   int samples_per_feature, int num_threads,
+                   bool verbose, bool skip_init = false, bool skip_train = false) {
             this->verbose = verbose;
 
-            // Initialize
-            initTraining(num_images, num_points_per_image, max_tree_depth);
+            if (!skip_init) {
+                // Initialize new samples
+                initTraining(num_images, num_points_per_image, max_tree_depth);
+            }
+
+            if (skip_train) return;
             
             if (verbose) {
                 std::cerr << "Init RTree training with maximum depth " << max_tree_depth << "\n";
@@ -207,11 +224,74 @@ namespace ark {
             maxProbeOffset = max_probe_offset;
             minSamples = min_samples;
             numThreads = num_threads;
+            numImages = num_images;
+            samplesPerFeature = samples_per_feature;
             nodes.resize(1);
             trainFromNode(nodes[0], 0, static_cast<int>(samples.size()), max_tree_depth);
             if (verbose) {
                 std::cerr << "Training finished\n";
             }
+        }
+
+        void writeSamples(const std::string & path) {
+            std::ofstream ofs(path, std::ios::out | std::ios::binary);
+            dataLoader.dataSource.serialize(ofs);
+            reorderByImage(0, samples.size());
+            ofs.write("S\n", 2);
+            size_t last_idx = 0;
+            util::write_bin(ofs, samples.size());
+            for (size_t i = 0; i <= samples.size(); ++i) {
+                if (i == samples.size() ||
+                    samples[i].index != samples[last_idx].index) {
+                    util::write_bin(ofs, samples[last_idx].index);
+                    util::write_bin(ofs, int(i - last_idx));
+                    for (size_t j = last_idx; j < i; ++j) {
+                        util::write_bin(ofs, samples[j].pix[0]);
+                        util::write_bin(ofs, samples[j].pix[1]);
+                    }
+                    last_idx = i;
+                }
+            }
+            util::write_bin(ofs, -1);
+            util::write_bin(ofs, -1);
+            ofs.close();
+        }
+
+        void readSamples(const std::string & path, bool verbose = false) {
+            std::ifstream ifs(path, std::ios::in | std::ios::binary);
+            if (verbose) {
+                std::cout << "Recovering data source from samples file\n";
+            }
+            dataLoader.dataSource.deserialize(ifs);
+            if (verbose) {
+                std::cout << "Reading samples from samples file\n";
+            }
+            char marker[2];
+            ifs.read(marker, 2);
+            if (strncmp(marker, "S\n", 2)) {
+                std::cerr << "ERROR: Invalid or corrupted samples file at " << path << "\n";
+                return;
+            }
+            size_t numSamplesTotal;
+            util::read_bin(ifs, numSamplesTotal);
+            samples.reserve(numSamplesTotal);
+            while (ifs) {
+                int imgIndex, imgSamps;
+                util::read_bin(ifs, imgIndex);
+                util::read_bin(ifs, imgSamps);
+                if (verbose && imgIndex % 20 == 0 && imgIndex >= 0) {
+                    std::cout << "Reading samples for image #" << imgIndex << " with " << imgSamps << " sample pixels\n";
+                }
+                if (!ifs || imgSamps < 0) break;
+                while (imgSamps--) {
+                    samples.emplace_back();
+                    Sample& sample = samples.back();
+                    sample.index = imgIndex;
+                    util::read_bin(ifs, sample.pix[0]);
+                    util::read_bin(ifs, sample.pix[1]);
+                }
+            }
+            ifs.close();
         }
 
     private:
@@ -239,14 +319,13 @@ namespace ark {
                     ". Current data interval: " << start << " to " << end << "\n";
             }
 
-            dataLoader.preload(samples, start, end, numThreads);
+            bool preloaded = dataLoader.preload(samples, start, end, numThreads);
             int featureCount = numFeatures;
             Eigen::VectorXf bestInfoGains(numThreads, 1);
             Eigen::VectorXf bestThreshs(numThreads, 1);
             bestInfoGains.setConstant(-FLT_MAX);
             std::vector<Feature> bestFeatures(numThreads);
 
-            // Mapreduce-ish
             auto worker = [&](int thread_id) {
                 float& bestInfoGain = bestInfoGains(thread_id);
                 float& bestThresh = bestThreshs(thread_id);
@@ -257,6 +336,11 @@ namespace ark {
                         std::lock_guard<std::mutex> lock(trainMutex);
                         if (featureCount <= 0) break;
                         --featureCount;
+                        if (verbose && end-start > 50000 &&
+                            ((preloaded && featureCount % 500 == 0) ||
+                            (!preloaded && featureCount % 10 == 0))) {
+                            std::cerr << featureCount << " features left to evaluate\n";
+                        }
                     }
 
                     // Create random feature in-place
@@ -342,14 +426,18 @@ namespace ark {
 
             // Compute scores
             std::vector<std::pair<float, int> > samplesByScore;
+            std::vector<int> sampleParts;
+            samplesByScore.reserve(end-start);
+            sampleParts.reserve(end-start);
             for (int i = start; i < end; ++i) {
                 const Sample& sample = samples[i];
-                auto dataArr = dataLoader.get(sample);
+                const auto& dataArr = dataLoader.get(sample);
                 samplesByScore.emplace_back(
                         scoreByFeature(dataArr[DATA_DEPTH],
                             sample.pix, feature.u, feature.v) , i);
                 uint8_t samplePart = dataArr[DATA_PART_MASK]
                     .template at<uint8_t>(sample.pix[1], sample.pix[0]);
+                sampleParts.push_back(samplePart);
                 if (samplePart >= distLeft.size()) {
                     std::cerr << "FATAL: Invalid sample " << int(samplePart) << " detected during RTree training, "
                                  "please check the randomization code\n";
@@ -365,13 +453,13 @@ namespace ark {
             // Start everything in the left set ...
             float bestInfoGain = -FLT_MAX;
             *optimal_thresh = samplesByScore[0].first;
-            size_t step = std::max<size_t>(samplesByScore.size() / SAMPLES_PER_FEATURE, 1);
+            size_t step = std::max<size_t>(samplesByScore.size() / samplesPerFeature, 1);
             float lastScore = -FLT_MAX;
             for (size_t i = 0; i < samplesByScore.size()-1; ++i) {
                 // Update distributions for left, right sets
-                const Sample& sample = samples[samplesByScore[i].second];
-                auto samplePart = dataLoader.get(sample)[DATA_PART_MASK]
-                    .template at<uint8_t>(sample.pix.y(), sample.pix.x());
+                int idx = samplesByScore[i].second;
+                const Sample& sample = samples[idx];
+                auto samplePart = sampleParts[idx - start];
                 distLeft[samplePart] -= 1.f;
                 distRight[samplePart] += 1.f;
                 if (i%step != 0 || lastScore == samplesByScore[i].first)
@@ -408,7 +496,7 @@ namespace ark {
 
             // 2. Choose num_points_per_image random foreground pixels from each image,
             for (size_t i = 0; i < chosenImages.size(); ++i) {
-                if (verbose && i % 10 == 9) {
+                if (verbose && i % 20 == 19) {
                     std::cerr << "Preprocessing data: " << i+1 << " of " << num_images << "\n";
                 }
                 cv::Mat mask = dataLoader.get(Sample(chosenImages[i], 0, 0))[DATA_PART_MASK];
@@ -417,7 +505,7 @@ namespace ark {
                 // cv::resize(mask, mask, mask.size() / 2);
                 // cv::imshow("MASKCat", mask);
                 // cv::waitKey(0);
-                std::vector<RTree::Vec2i> candidates;
+                std::vector<RTree::Vec2i, Eigen::aligned_allocator<RTree::Vec2i> > candidates;
                 for (int r = 0; r < mask.rows; ++r) {
                     auto* ptr = mask.ptr<uint8_t>(r);
                     for (int c = 0; c < mask.cols; ++c) {
@@ -427,7 +515,7 @@ namespace ark {
                         }
                     }
                 }
-                std::vector<RTree::Vec2i> chosenCandidates =
+                std::vector<RTree::Vec2i, Eigen::aligned_allocator<RTree::Vec2i> > chosenCandidates =
                     (candidates.size() > static_cast<size_t>(num_points_per_image)) ?
                     random_util::choose(candidates, num_points_per_image) : std::move(candidates);
                 for (auto& v : chosenCandidates) {
@@ -435,9 +523,8 @@ namespace ark {
                 }
             }
 
-            std::random_device rd;
-            std::mt19937 g(rd());
-            std::shuffle(samples.begin(), samples.end(), g);
+            // Note to future self: DO NOT SHUFFLE SAMPLES
+            // Order of samples is important for caching.
             if(verbose) {
                 std::cerr << "Preprocessing done, sparsely verifying data validity before training...\n";
             }
@@ -468,7 +555,22 @@ namespace ark {
                     ++nextIndex;
                 }
             }
+            reorderByImage(start, nextIndex);
+            reorderByImage(nextIndex, end);
             return nextIndex;
+        }
+
+        // Reorder samples in [start, ..., end-1] by image index to improve cache performance
+        void reorderByImage(int start, int end) {
+            int nextIndex = start;
+            static auto sampleComp = [](const Sample & a, const Sample & b) {
+                if (a.index == b.index) {
+                    if (a.pix[1] == b.pix[1]) return a.pix[0] < b.pix[0];
+                    return a.pix[1] < b.pix[1];
+                }
+                return a.index < b.index;
+            };
+            sort(samples.begin() + start, samples.begin() + end, sampleComp);
         }
 
         std::vector<RTree::RNode>& nodes;
@@ -477,25 +579,31 @@ namespace ark {
         DataLoader<DataSource> dataLoader;
 
         bool verbose;
-        int numFeatures, maxProbeOffset, minSamples, numThreads;
+        int numImages, numFeatures, maxProbeOffset, minSamples, numThreads, samplesPerFeature;
 
-        // TODO: Make this a configurable argument
-        const int SAMPLES_PER_FEATURE = 60;
+        // const int SAMPLES_PER_FEATURE = 60;
         std::vector<int> chosenImages;
-        std::vector<Sample> samples;
+        SampleVec samples;
     };
 
     struct FileDataSource {
         FileDataSource(
                 const std::string& depth_dir,
-                const std::string& part_mask_dir) {
+                const std::string& part_mask_dir)
+       : depthDir(depth_dir), partMaskDir(part_mask_dir) {
+           reload();
+       }
+        
+        void reload() {
+            _data_paths[DATA_DEPTH].clear();
+            _data_paths[DATA_PART_MASK].clear();
             using boost::filesystem::directory_iterator;
             // List directories
-            for (auto it = directory_iterator(depth_dir); it != directory_iterator(); ++it) {
+            for (auto it = directory_iterator(depthDir); it != directory_iterator(); ++it) {
                 _data_paths[DATA_DEPTH].push_back(it->path().string());
             }
             std::sort(_data_paths[DATA_DEPTH].begin(), _data_paths[DATA_DEPTH].end());
-            for (auto it = directory_iterator(part_mask_dir); it != directory_iterator(); ++it) {
+            for (auto it = directory_iterator(partMaskDir); it != directory_iterator(); ++it) {
                 _data_paths[DATA_PART_MASK].push_back(it->path().string());
             }
             std::sort(_data_paths[DATA_PART_MASK].begin(), _data_paths[DATA_PART_MASK].end());
@@ -505,13 +613,44 @@ namespace ark {
             return _data_paths[0].size();
         }
 
-        std::array<cv::Mat, 2> load(int idx) {
-            return {
-                    cv::imread(_data_paths[idx][0], IMREAD_FLAGS[0]),
-                    cv::imread(_data_paths[idx][1], IMREAD_FLAGS[1])
-            };
+        const std::array<cv::Mat, 2>& load(int idx) {
+            thread_local std::array<cv::Mat, 2> arr;
+            thread_local int last_idx = -1;
+            if (idx != last_idx) {
+                arr[0] = cv::imread(_data_paths[idx][0], IMREAD_FLAGS[0]);
+                arr[1] = cv::imread(_data_paths[idx][1], IMREAD_FLAGS[1]);
+                last_idx = idx;
+            }
+            return arr;
         }
+
+        void serialize(std::ostream& os) {
+            os.write("SRC_FILE", 8);
+            util::write_bin(os, depthDir.size());
+            os.write(depthDir.c_str(), depthDir.size());
+            util::write_bin(os, partMaskDir.size());
+            os.write(depthDir.c_str(), depthDir.size());
+        }
+
+        void deserialize(std::istream& is) {
+            char marker[8];
+            is.read(marker, 8);
+            if (strncmp(marker, "SRC_FILE", 8)) {
+                std::cerr << "ERROR: Invalid file data source specified in stored samples file\n";
+                return;
+            }
+            size_t sz;
+            util::read_bin(is, sz);
+            depthDir.resize(sz);
+            is.read(&depthDir[0], sz);
+            util::read_bin(is, sz);
+            partMaskDir.resize(sz);
+            is.read(&partMaskDir[1], sz);
+            reload();
+        }
+
         std::vector<std::string> _data_paths[2];
+        std::string depthDir, partMaskDir;
     };
 
     struct AvatarDataSource {
@@ -537,25 +676,56 @@ namespace ark {
             return numImages;
         }
 
-        std::array<cv::Mat, 2> load(int idx) {
+        const std::array<cv::Mat, 2>& load(int idx) {
+            thread_local std::array<cv::Mat, 2> arr;
+            thread_local int last_idx = -1;
             thread_local Avatar ava(avaModel);
-            ava.randomize(true, true, true, idx);
-
-            if (poseSequence.numFrames) {
-                // random_util::randint<size_t>(0, poseSequence.numFrames - 1)
-                poseSequence.poseAvatar(ava, seq[idx % poseSequence.numFrames]);
-                ava.r[0].setIdentity();
-                ava.randomize(false, true, true, idx);
-            } else {
-                ava.randomize(true, true, true, idx);
+            if (idx != last_idx) {
+                last_idx = idx;
+                if (poseSequence.numFrames) {
+                    // random_util::randint<size_t>(0, poseSequence.numFrames - 1)
+                    poseSequence.poseAvatar(ava, seq[idx % poseSequence.numFrames]);
+                    ava.r[0].setIdentity();
+                    ava.randomize(false, true, true, idx);
+                } else {
+                    ava.randomize(true, true, true, idx);
+                }
+                ava.update();
+                AvatarRenderer renderer(ava, intrin);
+                arr[0] = renderer.renderDepth(imageSize),
+                arr[1] = renderer.renderPartMask(imageSize, partMap);
             }
-            ava.update();
-            AvatarRenderer renderer(ava, intrin);
-            return {
-                renderer.renderDepth(imageSize),
-                renderer.renderPartMask(imageSize, partMap)
-            };
+            return arr;
         }
+
+        // Warning: serialization is incomplete, still need to load same avatar model, pose sequence, etc.
+        void serialize(std::ostream& os) {
+            os.write("SRC_AVATAR", 10);
+            util::write_bin(os, seq.size());
+            for (int i : seq) {
+                util::write_bin(os, i);
+            }
+        }
+
+        void deserialize(std::istream& is) {
+            char marker[10];
+            is.read(marker, 10);
+            if (strncmp(marker, "SRC_AVATAR", 10)) {
+                std::cerr << "ERROR: Invalid avatar data source specified in stored samples file\n";
+                return;
+            }
+
+            seq.clear();
+            size_t sz;
+            util::read_bin(is, sz);
+            seq.reserve(sz);
+            int x;
+            for (int i = 0; i < sz; ++i) {
+                util::read_bin(is, x);
+                seq.push_back(x);
+            }
+        }
+
         int numImages;
         cv::Size imageSize;
         AvatarModel& avaModel;
@@ -687,12 +857,23 @@ namespace ark {
                    int max_probe_offset,
                    int min_samples, 
                    int max_tree_depth,
-                   int max_images_loaded) {
+                   int samples_per_feature,
+                   int max_images_loaded,
+                   const std::string& samples_file,
+                   bool generate_samples_file_only
+               ) {
         nodes.reserve(1 << std::min(max_tree_depth, 22));
         FileDataSource dataSource(depth_dir, part_mask_dir);
         Trainer<FileDataSource> trainer(nodes, leafData, dataSource, numParts, max_images_loaded);
+        bool shouldReadSamples = !samples_file.empty() && !generate_samples_file_only;
+        if (shouldReadSamples) {
+            trainer.readSamples(samples_file, verbose);
+        }
         trainer.train(num_images, num_points_per_image, num_features,
-                max_probe_offset, min_samples, max_tree_depth, num_threads, verbose);
+                max_probe_offset, min_samples, max_tree_depth, samples_per_feature, num_threads, verbose, shouldReadSamples, generate_samples_file_only);
+        if (generate_samples_file_only) {
+            trainer.writeSamples(samples_file);
+        }
     }
 
     void RTree::trainFromAvatar(AvatarModel& avatar_model,
@@ -707,12 +888,23 @@ namespace ark {
                    int max_probe_offset,
                    int min_samples, 
                    int max_tree_depth,
+                   int samples_per_feature,
                    const int* part_map,
-                   int max_images_loaded) {
+                   int max_images_loaded,
+                   const std::string& samples_file,
+                   bool generate_samples_file_only
+               ) {
         nodes.reserve(1 << std::min(max_tree_depth, 22));
         AvatarDataSource dataSource(avatar_model, pose_seq, intrin, image_size, num_images, part_map);
         Trainer<AvatarDataSource> trainer(nodes, leafData, dataSource, numParts, max_images_loaded);
+        bool shouldReadSamples = !samples_file.empty() && !generate_samples_file_only;
+        if (shouldReadSamples) {
+            trainer.readSamples(samples_file, verbose);
+        }
         trainer.train(num_images, num_points_per_image, num_features,
-                max_probe_offset, min_samples, max_tree_depth, num_threads, verbose);
+                max_probe_offset, min_samples, max_tree_depth, samples_per_feature, num_threads, verbose, shouldReadSamples, generate_samples_file_only);
+        if (generate_samples_file_only) {
+            trainer.writeSamples(samples_file);
+        }
     }
 }

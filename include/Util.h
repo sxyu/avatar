@@ -52,6 +52,18 @@ namespace ark {
         * @return color in Vec3b format
         */
         cv::Vec3b paletteColor(int color_index, bool bgr = true);
+
+        template<class T>
+        /** Write binary to ostream */
+        inline T write_bin(std::ostream& os, T val) {
+            os.write(reinterpret_cast<char*>(&val), sizeof(T));
+        }
+
+        template<class T>
+        /** Read binary from istream */
+        inline void read_bin(std::istream& is, T& val) {
+            is.read(reinterpret_cast<char*>(&val), sizeof(T));
+        }
     }
 
     // Randomization utilities
@@ -72,10 +84,10 @@ namespace ark {
             return z % (hi - lo + 1) + lo;
         }
 
-        template<class T>
+        template<class T, class A>
         /** Choose k elements from a vector */
-        std::vector<T> choose(std::vector<T> & source, int k) {
-            std::vector<T> out;
+        std::vector<T, A> choose(std::vector<T, A> & source, int k) {
+            std::vector<T, A> out;
             for (int j = 0; j < std::min<int>(k, source.size()); ++j) {
                 int r = randint(j, static_cast<int>(source.size()) - 1); 
                 out.push_back(source[r]);

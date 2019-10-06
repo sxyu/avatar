@@ -13,8 +13,17 @@ namespace ark {
     class RTree {
     public:
         typedef Eigen::Vector2f Vec2;
-        typedef Eigen::Vector2i Vec2i;
+        // NOTE: ASSUMING width/height <= 32767
+        typedef Eigen::Matrix<int16_t, 2, 1> Vec2i;
+        /** Probability distribution over numParts parts */
         typedef Eigen::VectorXf Distribution;
+
+        /** Assumed depth of background (meters)
+         *  All points not on body will be set to this depth prior to training/detection
+         *  (Value is found in RTree.cpp) */
+        static const float BACKGROUND_DEPTH;
+        // TODO: Possibly, expose background depth as a command line arg.
+        // However, I don't think it is very important.
 
         struct RNode {
             RNode();
@@ -51,8 +60,10 @@ namespace ark {
 
         /** Train from images and part-masks in OpenARK DataSet format,
          *  with num_images random images and num_points_per_image random pixels
-         *  from each image. Do not call train again while training is on-going
-         *  on the same RTree. */
+         *  from each image.
+         *  WARNING: Do not call train ON ANY RTree while training is on-going in the
+         *  same process, that is, one RTree can be trained at a time in the same process.
+         *  TODO: Maybe fix this limitation */
         void train(const std::string& depth_dir,
                    const std::string& part_mask_dir,
                    int num_threads = std::thread::hardware_concurrency(),
@@ -63,7 +74,10 @@ namespace ark {
                    int max_probe_offset = 225, 
                    int min_samples = 100,      // term crit
                    int max_tree_depth = 20,    // term crit 
-                   int max_images_loaded = 2000
+                   int samples_per_feature = 60,
+                   int max_images_loaded = 2000,
+                   const std::string& samples_file = "",
+                   bool generate_samples_file_only = false
                    );
 
         /** Train directly from avatar by rendering simulated images,
@@ -83,8 +97,11 @@ namespace ark {
                    int max_probe_offset = 225, 
                    int min_samples = 100,      // term crit
                    int max_tree_depth = 20,     // term crit 
+                   int samples_per_feature = 60,
                    const int* part_map = nullptr, // part map
-                   int max_images_loaded = 2000
+                   int max_images_loaded = 2000,
+                   const std::string& samples_file = "",
+                   bool generate_samples_file_only = false
                    );
 
         std::vector<RNode> nodes;
