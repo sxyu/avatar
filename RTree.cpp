@@ -84,10 +84,8 @@ namespace ark {
 
     template<class DataSource>
     struct DataLoader {
-        // TODO: Make this a configurable argument
-        const int MAX_IMAGES_LOADED = 2000;
         DataSource& dataSource;
-        DataLoader(DataSource& data_source) : dataSource(data_source) {}
+        DataLoader(DataSource& data_source, int max_images_loaded) : dataSource(data_source), maxImagesLoaded(max_images_loaded) {}
 
         bool preload(const std::vector<Sample>& samples, int a, int b, int numThreads) {
             std::vector<int> images;
@@ -96,7 +94,7 @@ namespace ark {
             }
             std::sort(images.begin(), images.end());
             images.resize(std::unique(images.begin(), images.end()) - images.begin());
-            if (images.size() > MAX_IMAGES_LOADED) {
+            if (images.size() > maxImagesLoaded) {
                 return false;
             }
             
@@ -108,7 +106,7 @@ namespace ark {
                     loadSize += 1;
                 }
             }
-            if (loadSize > MAX_IMAGES_LOADED) {
+            if (loadSize > maxImagesLoaded) {
                 clear();
             } else {
                 std::vector<int> newImages;
@@ -150,7 +148,7 @@ namespace ark {
         }
 
         std::array<cv::Mat, 2> get(const Sample& sample) const {
-            int iidx = imageIdx[sample.index];
+            int iidx = sample.index >= imageIdx.size() ? -1 : imageIdx[sample.index];
             if (iidx < 0) {
                 cv::Mat im0, im1;
                 return dataSource.load(sample.index);
@@ -168,6 +166,7 @@ namespace ark {
 
         std::vector<std::array<cv::Mat, 2> > data;
         std::vector<int> imageIdx, revImageIdx;
+        int maxImagesLoaded;
     };
 
     /** Internal trainer implementation */
@@ -185,13 +184,17 @@ namespace ark {
         Trainer(std::vector<RTree::RNode>& nodes,
                 std::vector<RTree::Distribution>& leaf_data,
                 DataSource& data_source,
-                int num_parts)
+                int num_parts,
+                int max_images_loaded)
             : nodes(nodes), leafData(leaf_data),
-              dataLoader(data_source), numParts(num_parts) { }
+              dataLoader(data_source, max_images_loaded), numParts(num_parts) {
+          }
 
         void train(int num_images, int num_points_per_image, int num_features,
                    int max_probe_offset, int min_samples, int max_tree_depth,
                    int num_threads, bool verbose) {
+            this->verbose = verbose;
+
             // Initialize
             initTraining(num_images, num_points_per_image, max_tree_depth);
             
@@ -204,7 +207,6 @@ namespace ark {
             maxProbeOffset = max_probe_offset;
             minSamples = min_samples;
             numThreads = num_threads;
-            this->verbose = verbose;
             nodes.resize(1);
             trainFromNode(nodes[0], 0, static_cast<int>(samples.size()), max_tree_depth);
             if (verbose) {
@@ -238,7 +240,6 @@ namespace ark {
             }
 
             dataLoader.preload(samples, start, end, numThreads);
-
             int featureCount = numFeatures;
             Eigen::VectorXf bestInfoGains(numThreads, 1);
             Eigen::VectorXf bestThreshs(numThreads, 1);
@@ -335,7 +336,7 @@ namespace ark {
         float optimalInformationGain(int start, int end, const Feature& feature, float* optimal_thresh) {
 
             // Initially everything is in left set
-            RTree::Distribution distLeft, distRight;
+            RTree::Distribution distLeft(numParts), distRight(numParts);
             distLeft.setZero();
             distRight.setZero();
 
@@ -347,8 +348,13 @@ namespace ark {
                 samplesByScore.emplace_back(
                         scoreByFeature(dataArr[DATA_DEPTH],
                             sample.pix, feature.u, feature.v) , i);
-                auto samplePart = dataArr[DATA_PART_MASK]
-                    .template at<uint8_t>(sample.pix.y(), sample.pix.x());
+                uint8_t samplePart = dataArr[DATA_PART_MASK]
+                    .template at<uint8_t>(sample.pix[1], sample.pix[0]);
+                if (samplePart >= distLeft.size()) {
+                    std::cerr << "FATAL: Invalid sample " << int(samplePart) << " detected during RTree training, "
+                                 "please check the randomization code\n";
+                    std::exit(0);
+                }
                 distLeft[samplePart] += 1.f;
             }
             static auto scoreComp = [](const std::pair<float, int> & a, const std::pair<float, int> & b) {
@@ -378,7 +384,7 @@ namespace ark {
                 float infoGain = - ((end - start - i - 1) * left_entropy
                                  + (i+1)                  * right_entropy);
                 if (infoGain > 0) {
-                    std::cerr << "FATAL ERROR: Possibly overflow detected during training, exiting. Internal data: left entropy "
+                    std::cerr << "FATAL: Possibly overflow detected during training, exiting. Internal data: left entropy "
                         << left_entropy << " right entropy "
                         << right_entropy << " information gain "
                         << infoGain<< "\n";
@@ -393,7 +399,7 @@ namespace ark {
             return bestInfoGain;
         }
 
-        void initTraining(int num_images, int num_points_per_image, int max_tree_depth, bool verbose = true) {
+        void initTraining(int num_images, int num_points_per_image, int max_tree_depth) {
             // 1. Choose num_images random images u.a.r. from given image list
             std::vector<int> allImages(dataLoader.dataSource.size());
             std::iota(allImages.begin(), allImages.end(), 0);
@@ -403,9 +409,14 @@ namespace ark {
             // 2. Choose num_points_per_image random foreground pixels from each image,
             for (size_t i = 0; i < chosenImages.size(); ++i) {
                 if (verbose && i % 10 == 9) {
-                    std::cerr << "Loading data: " << i+1 << " of " << num_images << "\n";
+                    std::cerr << "Preprocessing data: " << i+1 << " of " << num_images << "\n";
                 }
                 cv::Mat mask = dataLoader.get(Sample(chosenImages[i], 0, 0))[DATA_PART_MASK];
+                // cv::Mat mask2 = dataLoader.get(Sample(chosenImages[i], 0, 0))[DATA_PART_MASK];
+                // cv::hconcat(mask, mask2, mask);
+                // cv::resize(mask, mask, mask.size() / 2);
+                // cv::imshow("MASKCat", mask);
+                // cv::waitKey(0);
                 std::vector<RTree::Vec2i> candidates;
                 for (int r = 0; r < mask.rows; ++r) {
                     auto* ptr = mask.ptr<uint8_t>(r);
@@ -427,6 +438,20 @@ namespace ark {
             std::random_device rd;
             std::mt19937 g(rd());
             std::shuffle(samples.begin(), samples.end(), g);
+            if(verbose) {
+                std::cerr << "Preprocessing done, sparsely verifying data validity before training...\n";
+            }
+            for (int i = 0; i < samples.size(); i += std::max<int>(samples.size() / 100, 1)) {
+                auto& sample = samples[i];
+                cv::Mat mask = dataLoader.get(sample)[DATA_PART_MASK];
+                if (mask.at<uint8_t>(sample.pix[1], sample.pix[0]) == 255) {
+                    std::cerr << "FATAL: Invalid data detected during verification: background pixels were included in samples.\n";
+                    std::exit(0);
+                }
+            }
+            if(verbose) {
+                std::cerr << "Result: data is valid\n";
+            }
         }
 
         // Split samples {start ... end-1} by feature+thresh in-place and return the dividing index
@@ -490,26 +515,54 @@ namespace ark {
     };
 
     struct AvatarDataSource {
-        AvatarDataSource(Avatar& ava, CameraIntrin& intrin,
-                         cv::Size& image_size, int num_images)
-            : ava(ava), intrin(intrin), imageSize(image_size), numImages(num_images) { }
+        AvatarDataSource(AvatarModel& ava_model, 
+                         AvatarPoseSequence& pose_seq,
+                         CameraIntrin& intrin,
+                         cv::Size& image_size,
+                         int num_images,
+                         const int* part_map)
+            : avaModel(ava_model), poseSequence(pose_seq), intrin(intrin), imageSize(image_size),
+              numImages(num_images), partMap(part_map) {
+            seq.reserve(poseSequence.numFrames);
+            for (int i = 0; i < poseSequence.numFrames; ++i) {
+                seq.push_back(i);
+            }
+            for (int i = 0; i < poseSequence.numFrames; ++i) {
+                int r = random_util::randint<size_t>(i, poseSequence.numFrames - 1);
+                if (r != i) std::swap(seq[r], seq[i]);
+            }
+        }
 
         int size() const {
             return numImages;
         }
 
         std::array<cv::Mat, 2> load(int idx) {
+            thread_local Avatar ava(avaModel);
             ava.randomize(true, true, true, idx);
+
+            if (poseSequence.numFrames) {
+                // random_util::randint<size_t>(0, poseSequence.numFrames - 1)
+                poseSequence.poseAvatar(ava, seq[idx % poseSequence.numFrames]);
+                ava.r[0].setIdentity();
+                ava.randomize(false, true, true, idx);
+            } else {
+                ava.randomize(true, true, true, idx);
+            }
+            ava.update();
             AvatarRenderer renderer(ava, intrin);
             return {
                 renderer.renderDepth(imageSize),
-                renderer.renderPartMask(imageSize)
+                renderer.renderPartMask(imageSize, partMap)
             };
         }
         int numImages;
         cv::Size imageSize;
-        Avatar& ava;
+        AvatarModel& avaModel;
+        AvatarPoseSequence& poseSequence;
         CameraIntrin& intrin;
+        std::vector<int> seq;
+        const int* partMap;
     };
  
     RTree::RTree(int num_parts) : numParts(num_parts) {}
@@ -633,15 +686,17 @@ namespace ark {
                    int num_features,
                    int max_probe_offset,
                    int min_samples, 
-                   int max_tree_depth) {
+                   int max_tree_depth,
+                   int max_images_loaded) {
         nodes.reserve(1 << std::min(max_tree_depth, 22));
         FileDataSource dataSource(depth_dir, part_mask_dir);
-        Trainer<FileDataSource> trainer(nodes, leafData, dataSource, numParts);
+        Trainer<FileDataSource> trainer(nodes, leafData, dataSource, numParts, max_images_loaded);
         trainer.train(num_images, num_points_per_image, num_features,
                 max_probe_offset, min_samples, max_tree_depth, num_threads, verbose);
     }
 
-    void RTree::trainFromAvatar(Avatar& avatar,
+    void RTree::trainFromAvatar(AvatarModel& avatar_model,
+                   AvatarPoseSequence& pose_seq,
                    CameraIntrin& intrin,
                    cv::Size& image_size,
                    int num_threads,
@@ -651,10 +706,12 @@ namespace ark {
                    int num_features,
                    int max_probe_offset,
                    int min_samples, 
-                   int max_tree_depth) {
+                   int max_tree_depth,
+                   const int* part_map,
+                   int max_images_loaded) {
         nodes.reserve(1 << std::min(max_tree_depth, 22));
-        AvatarDataSource dataSource(avatar, intrin, image_size, num_images);
-        Trainer<AvatarDataSource> trainer(nodes, leafData, dataSource, numParts);
+        AvatarDataSource dataSource(avatar_model, pose_seq, intrin, image_size, num_images, part_map);
+        Trainer<AvatarDataSource> trainer(nodes, leafData, dataSource, numParts, max_images_loaded);
         trainer.train(num_images, num_points_per_image, num_features,
                 max_probe_offset, min_samples, max_tree_depth, num_threads, verbose);
     }

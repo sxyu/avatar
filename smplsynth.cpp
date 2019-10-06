@@ -63,12 +63,21 @@ void run(int num_threads, int num_to_gen, std::string out_path, const cv::Size& 
 
     const AvatarModel model;
     AvatarPoseSequence poseSequence;
+    std::vector<int> seq;
     if (poseSequence.numFrames) {
         std::cerr << "Using mocap sequence with " << poseSequence.numFrames << " frames to generate poses\n";
         if (preload) {
             std::cerr << "Pre-loading sequence...\n";
             poseSequence.preload();
             std::cerr << "Pre-loading done\n";
+        }
+        seq.reserve(poseSequence.numFrames);
+        for (int i = 0; i < poseSequence.numFrames; ++i) {
+            seq.push_back(i);
+        }
+        for (int i = 0; i < poseSequence.numFrames; ++i) {
+            int r = random_util::randint<size_t>(i, poseSequence.numFrames - 1);
+            if (r != i) std::swap(seq[r], seq[i]);
         }
     } else{
         std::cerr << "WARNING: no mocap pose sequence found, will fallback to GMM to generate poses\n";
@@ -93,7 +102,7 @@ void run(int num_threads, int num_to_gen, std::string out_path, const cv::Size& 
 
             if (poseSequence.numFrames) {
                 // random_util::randint<size_t>(0, poseSequence.numFrames - 1)
-                poseSequence.poseAvatar(ava, i % poseSequence.numFrames);
+                poseSequence.poseAvatar(ava, seq[i % poseSequence.numFrames]);
                 ava.r[0].setIdentity();
                 ava.randomize(false, true, true);
             } else {

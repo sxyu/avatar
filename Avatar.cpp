@@ -727,6 +727,10 @@ namespace ark {
                 orderedFaces.emplace_back(0.f, cv::Vec3i(face(0), face(1), face(2)));
             }
 
+            if (ava.cloud.cols() == 0) {
+                std::cerr << "WARNING: Attempt to render empty avatar detected, please call update() first\n";
+                return orderedFaces;
+            }
             // Sort faces by decreasing center depth
             // so that when painted front faces will cover back faces
             for (int i = 0; i < ava.model.numFaces();++i) {
@@ -740,6 +744,10 @@ namespace ark {
     }
 
     cv::Mat AvatarRenderer::renderDepth(const cv::Size& image_size) const {
+        if (ava.cloud.cols() == 0) {
+            std::cerr << "WARNING: Attempt to render empty avatar detected, please call update() first\n";
+            return cv::Mat();
+        }
         const auto& projected = getProjectedPoints();
         const auto& faces = getOrderedFaces();
 
@@ -751,6 +759,10 @@ namespace ark {
     }
 
     cv::Mat AvatarRenderer::renderPartMask(const cv::Size& image_size, const int* part_map) const {
+        if (ava.cloud.cols() == 0) {
+            std::cerr << "WARNING: Attempt to render empty avatar detected\n";
+            return cv::Mat();
+        }
         const auto& projected = getProjectedPoints();
         const auto& faces = getOrderedFaces();
 

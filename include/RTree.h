@@ -62,7 +62,8 @@ namespace ark {
                    int num_features = 2000,
                    int max_probe_offset = 225, 
                    int min_samples = 100,      // term crit
-                   int max_tree_depth = 20     // term crit 
+                   int max_tree_depth = 20,    // term crit 
+                   int max_images_loaded = 2000
                    );
 
         /** Train directly from avatar by rendering simulated images,
@@ -70,7 +71,8 @@ namespace ark {
          *  num_points_per_image random pixels from each image.
          *  Do not call train again while training is on-going
          *  on the same RTree. */
-        void trainFromAvatar(Avatar& avatar,
+        void trainFromAvatar(AvatarModel& avatar_model,
+                   AvatarPoseSequence& pose_seq,
                    CameraIntrin& intrin,
                    cv::Size& image_size,
                    int num_threads = std::thread::hardware_concurrency(),
@@ -80,7 +82,9 @@ namespace ark {
                    int num_features = 2000,
                    int max_probe_offset = 225, 
                    int min_samples = 100,      // term crit
-                   int max_tree_depth = 20     // term crit 
+                   int max_tree_depth = 20,     // term crit 
+                   const int* part_map = nullptr, // part map
+                   int max_images_loaded = 2000
                    );
 
         std::vector<RNode> nodes;
