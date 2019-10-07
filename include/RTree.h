@@ -74,7 +74,8 @@ namespace ark {
                    int max_probe_offset = 225, 
                    int min_samples = 100,      // term crit
                    int max_tree_depth = 20,    // term crit 
-                   int samples_per_feature = 60,
+                   int samples_per_feature = 150,
+                   int threshes_per_feature = 30,
                    int max_images_loaded = 2000,
                    const std::string& samples_file = "",
                    bool generate_samples_file_only = false
@@ -97,7 +98,8 @@ namespace ark {
                    int max_probe_offset = 225, 
                    int min_samples = 100,      // term crit
                    int max_tree_depth = 20,     // term crit 
-                   int samples_per_feature = 60,
+                   int samples_per_feature = 150,
+                   int threshes_per_feature = 30,
                    const int* part_map = nullptr, // part map
                    int max_images_loaded = 2000,
                    const std::string& samples_file = "",

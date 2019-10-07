@@ -205,7 +205,7 @@ namespace ark {
 
         void train(int num_images, int num_points_per_image, int num_features,
                    int max_probe_offset, int min_samples, int max_tree_depth,
-                   int samples_per_feature, int num_threads,
+                   int samples_per_feature, int threshes_per_feature, int num_threads,
                    bool verbose, bool skip_init = false, bool skip_train = false) {
             this->verbose = verbose;
 
@@ -227,6 +227,7 @@ namespace ark {
             numThreads = num_threads;
             numImages = num_images;
             samplesPerFeature = samples_per_feature;
+            threshesPerFeature = threshes_per_feature;
             nodes.resize(1);
             trainFromNode(nodes[0], 0, static_cast<int>(samples.size()), max_tree_depth);
             if (verbose) {
@@ -320,7 +321,6 @@ namespace ark {
                     ". Current data interval: " << start << " to " << end << "\n";
             }
 
-            bool preloaded = dataLoader.preload(samples, start, end, numThreads);
             using FeatureVec = std::vector<Feature, Eigen::aligned_allocator<Feature> >; 
             FeatureVec candidateFeatures;
             candidateFeatures.resize(numFeatures);
@@ -341,29 +341,31 @@ namespace ark {
             }
 
             // Precompute features scores
-            Eigen::MatrixXd sampleFeatureScores(end - start, numFeatures);
-            Eigen::Matrix<uint8_t, Eigen::Dynamic, 1> sampleParts(end - start);
+            if (verbose) {
+                std::cerr << "Allocating memory and sampling...\n";
+            }
+            SampleVec subsamples;
+            subsamples = random_util::choose(samples, start, end, samplesPerFeature);
+            Eigen::MatrixXd sampleFeatureScores(subsamples.size(), numFeatures);
+            Eigen::Matrix<uint8_t, Eigen::Dynamic, 1> sampleParts(subsamples.size());
+            dataLoader.preload(subsamples, 0, subsamples.size(), numThreads);
 
             std::vector<std::thread> threadMgr;
 
             if (verbose) {
-                std::cerr << "Computing features...\n";
+                std::cerr << "Computing features on sparse samples...\n";
             }
-            int sampleCount = start;
-            auto precomputeWorker = [&]() {
+            size_t sampleCount = 0;
+            // This worker loads and computes the pixel scores and parts for sparse features
+            auto sparseFeatureWorker = [&]() {
                 int sampleId;
                 while (true) {
                     {
                         std::lock_guard<std::mutex> lock(trainMutex);
-                        if (sampleCount >= end) break;
+                        if (sampleCount >= subsamples.size()) break;
                         sampleId = sampleCount++;
-                        if (verbose && end-start > 50000 &&
-                                (sampleCount - start) % 10000 == 0) {
-                            std::cerr << " Computing features for sample " << sampleCount - start <<
-                                " of " << end-start << "\n";
-                        }
                     };
-                    auto& sample = samples[sampleId];
+                    auto& sample = subsamples[sampleId];
                     const auto& dataArr = dataLoader.get(sample);
 
                     sampleParts(sampleId) = dataArr[DATA_PART_MASK]
@@ -379,7 +381,7 @@ namespace ark {
             };
 
             for (int i = 0; i < numThreads; ++i) {
-                threadMgr.emplace_back(precomputeWorker);
+                threadMgr.emplace_back(sparseFeatureWorker);
             }
             for (int i = 0; i < numThreads; ++i) {
                 threadMgr[i].join();
@@ -387,21 +389,26 @@ namespace ark {
             threadMgr.clear();
 
             if (verbose) {
-                std::cerr << "Optimizing information gain...\n";
+                std::cerr << "Optimizing information gain on sparse samples...\n";
             }
 
             // Find best information gain
-            int featureCount = numFeatures;
-            Eigen::VectorXf bestInfoGains(numThreads, 1);
-            Eigen::VectorXf bestThreshs(numThreads, 1);
-            bestInfoGains.setConstant(-FLT_MAX);
-            FeatureVec bestFeatures(numThreads);
+            std::vector<std::vector<std::array<float, 2> > > featureThreshes(numFeatures);
 
-            auto worker = [&](int thread_id) {
-                float& bestInfoGain = bestInfoGains(thread_id);
-                float& bestThresh = bestThreshs(thread_id);
-                Feature& bestFeature = bestFeatures[thread_id];
-                int featureId ;
+            int featureCount = numFeatures;
+            // bestInfoGains.setConstant(-FLT_MAX);
+            // Eigen::VectorXf bestInfoGains(numThreads, 1);
+            // Eigen::VectorXf bestThreshs(numThreads, 1);
+            // FeatureVec bestFeatures(numThreads);
+
+            bool shortCircuitOnFeatureOpt = end-start == subsamples.size();
+
+            // This worker finds threshesPerSample optimal thresholds for each feature on the selected sparse features
+            auto threshWorker = [&](int thread_id) {
+                // float& bestInfoGain = bestInfoGains(thread_id);
+                // float& bestThresh = bestThreshs(thread_id);
+                // Feature& bestFeature = bestFeatures[thread_id];
+                int featureId;
                 while (true) {
                     {
                         std::lock_guard<std::mutex> lock(trainMutex);
@@ -409,42 +416,177 @@ namespace ark {
 
                         if (verbose && end-start > 50000 &&
                                 featureCount % 100 == 0) {
-                            std::cerr << " Candidate features to evaluate: " << featureCount << "\n";
+                            std::cerr << " Sparse features to evaluate: " << featureCount << "\n";
                         }
                         featureId = --featureCount;
                     }
 
                     auto& feature = candidateFeatures[featureId];
                     float optimalThresh;
-                    float infoGain =
-                        optimalInformationGain(
-                                sampleFeatureScores, sampleParts,
-                                featureId, start, end, &optimalThresh);
+                    // float infoGain =
+                    computeOptimalThreshes(
+                            subsamples, sampleFeatureScores, sampleParts,
+                            featureId, featureThreshes[featureId], shortCircuitOnFeatureOpt);
 
-                    if (infoGain >= bestInfoGain) {
-                        bestInfoGain = infoGain;
-                        bestThresh = optimalThresh;
-                        bestFeature = feature;
-                    }
+                    // if (infoGain >= bestInfoGain) {
+                        // bestInfoGain = infoGain;
+                        // bestThresh = optimalThresh;
+                        // bestFeature = feature;
+                    // }
                 }
             };
 
             for (int i = 0; i < numThreads; ++i) {
-                threadMgr.emplace_back(worker, i);
+                threadMgr.emplace_back(threshWorker, i);
             }
-            
-            int bestThreadId = 0;
             for (int i = 0; i < numThreads; ++i) {
                 threadMgr[i].join();
-                if (i && bestInfoGains(i) > bestInfoGains(bestThreadId)) {
-                    bestThreadId = i;
+            }
+
+            float bestThresh, bestInfoGain = -FLT_MAX;
+            Feature bestFeature;
+
+            if (shortCircuitOnFeatureOpt) {
+                // Interval is very short (only has subsamples), reuse earlier computations
+                for (size_t featureId = 0; featureId < numFeatures; ++featureId) {
+                    auto& bestFeatureThresh = featureThreshes[featureId][0];
+                    if (bestFeatureThresh[0] > bestInfoGain) {
+                        bestInfoGain = bestFeatureThresh[0];
+                        bestThresh = bestFeatureThresh[1];
+                        bestFeature = candidateFeatures[featureId];
+                    }
+                }
+            } else {
+                // Interval is long
+                if (verbose) {
+                    std::cerr << "Computing part distributions for each candidate feature/threshold pair...\n";
+                }
+                sampleFeatureScores.resize(0, 0);
+                sampleParts.resize(0);
+                { 
+                    SampleVec _;
+                    subsamples.swap(_);
+                }
+                bool preloaded = dataLoader.preload(samples, start, end, numThreads);
+
+                std::vector<Eigen::MatrixXi, Eigen::aligned_allocator<Eigen::MatrixXi> > featureThreshDist(numFeatures); 
+                for (int i = 0; i < numFeatures; ++i) {
+                    featureThreshDist[i].resize(featureThreshes[i].size(), numParts * 2);
+                    featureThreshDist[i].setZero();
+                }
+
+                threadMgr.clear();
+                sampleCount = start;
+                // Compute part distributions for each feature/threshold pair
+                auto featureDistributionWorker = [&]() {
+                    int sampleId;
+                    while (true) {
+                        {
+                            std::lock_guard<std::mutex> lock(trainMutex);
+                            if (sampleCount >= end) break;
+                            sampleId = sampleCount++;
+                        };
+                        auto& sample = samples[sampleId];
+                        const auto& dataArr = dataLoader.get(sample);
+
+                        uint32_t samplePart = dataArr[DATA_PART_MASK]
+                            .template at<uint8_t>(sample.pix[1], sample.pix[0]);
+
+                        for (int featureId = 0; featureId < numFeatures; ++featureId) {
+                            auto& feature = candidateFeatures[featureId];
+                            auto& distMat = featureThreshDist[featureId];
+                            float score = scoreByFeature(dataArr[DATA_DEPTH],
+                                        sample.pix, feature.u, feature.v);
+                            for (size_t threshId = 0; threshId < featureThreshes[featureId].size(); ++threshId) {
+                                uint32_t part = (score > featureThreshes[featureId][threshId][1]) ? samplePart : samplePart + numParts;
+                                {
+                                    std::lock_guard<std::mutex> lock(trainMutex);
+                                    ++distMat(threshId, part);
+                                }
+                            }
+                        }
+                    }
+                };
+
+                for (int i = 0; i < numThreads; ++i) {
+                    threadMgr.emplace_back(featureDistributionWorker);
+                }
+                for (int i = 0; i < numThreads; ++i) {
+                    threadMgr[i].join();
+                }
+                if (verbose) {
+                    std::cerr << "Finding optimal feature...\n";
+                }
+                threadMgr.clear();
+
+                featureCount = numFeatures;
+                auto featureOptWorker = [&]() {
+                    // float& bestInfoGain = bestInfoGains(thread_id);
+                    // float& bestThresh = bestThreshs(thread_id);
+                    // Feature& bestFeature = bestFeatures[thread_id];
+                    int featureId;
+                    while (true) {
+                        {
+                            std::lock_guard<std::mutex> lock(trainMutex);
+                            if (featureCount <= 0) break;
+
+                            if (verbose && end-start > 50000 &&
+                                    featureCount % 100 == 0) {
+                                std::cerr << " Candidate features to evaluate: " << featureCount << "\n";
+                            }
+                            featureId = --featureCount;
+                        }
+                        auto& feature = candidateFeatures[featureId];
+                        auto& distMat = featureThreshDist[featureId];
+
+                        float featureBestInfoGain = -FLT_MAX;
+                        float featureBestThresh = -1.;
+
+                        for (size_t threshId = 0; threshId < featureThreshes[featureId].size(); ++threshId) {
+                            auto distLeft = distMat.block<1, Eigen::Dynamic>(threshId, 0, 1, numParts);
+                            auto distRight = distMat.block<1, Eigen::Dynamic>(threshId, numParts, 1, numParts);
+
+                            float lsum = distLeft.sum();
+                            float rsum = distRight.sum();
+
+                            float leftEntropy = entropy(distLeft.template cast<float>() / lsum);
+                            float rightEntropy = entropy(distRight.template cast<float>() / rsum);
+                            // Compute the information gain
+                            float infoGain = - lsum * leftEntropy + rsum * rightEntropy;
+                            if (infoGain > 0) {
+                                std::cerr << "FATAL: Possibly overflow detected during training, exiting. Internal data: left entropy "
+                                    << leftEntropy << " right entropy "
+                                    << rightEntropy << " information gain "
+                                    << infoGain<< "\n";
+                                std::exit(2);
+                            }
+                            if (infoGain > featureBestThresh) {
+                                featureBestInfoGain = infoGain;
+                                featureBestThresh = featureThreshes[featureId][threshId][1];
+                            }
+                        }
+                        {
+                            std::lock_guard<std::mutex> lock(trainMutex);
+                            if (featureBestThresh > bestThresh) {
+                                bestInfoGain = featureBestInfoGain;
+                                bestFeature = feature;
+                                bestThresh = featureBestThresh;
+                            }
+                        }
+                    }
+                };
+                for (int i = 0; i < numThreads; ++i) {
+                    threadMgr.emplace_back(featureOptWorker);
+                }
+                for (int i = 0; i < numThreads; ++i) {
+                    threadMgr[i].join();
                 }
             }
-            
-            int mid = split(start, end, bestFeatures[bestThreadId], bestThreshs(bestThreadId));
+
+            int mid = split(start, end, bestFeature, bestThresh);
 
             if (verbose) {
-                std::cerr << "> Best info gain " << bestInfoGains(bestThreadId) << ", thresh " << bestThreshs(bestThreadId) << ", feature.u " << bestFeatures[bestThreadId].u.x() << "," << bestFeatures[bestThreadId].u.y() <<", features.v" << bestFeatures[bestThreadId].u.x() << "," << bestFeatures[bestThreadId].u.y() << "\n";
+                std::cerr << "> Best info gain " << bestInfoGain << ", thresh " << bestThresh << ", feature.u " << bestFeature.v.x() << "," << bestFeature.v.y() <<", features.v" << bestFeature.u.x() << "," << bestFeature.u.y() << "\n";
             }
             //std::cerr << bestThreadId << "BT thresh" << bestThreshs(bestThreadId) << ",u\n" << bestFeatures[bestThreadId].u << "\nv\n" <<bestFeatures[bestThreadId].v << "\n";
             if (mid == end || mid == start) {
@@ -471,9 +613,9 @@ namespace ark {
                 */
                 return;
             }
-            node.thresh = bestThreshs(bestThreadId);
-            node.u = bestFeatures[bestThreadId].u;
-            node.v = bestFeatures[bestThreadId].v;
+            node.thresh = bestThresh;
+            node.u = bestFeature.u;
+            node.v = bestFeature.v;
 
             node.lnode = static_cast<int>(nodes.size());
             nodes.emplace_back();
@@ -485,10 +627,15 @@ namespace ark {
         }
 
         // Compute information gain (mutual information scaled and shifted) by choosing optimal threshold
-        float optimalInformationGain(
+        // output into optimal_thresh.col(feature_id)
+        // best <= threshesPerSample thresholds are found and returned in arbitrary order
+        // if place_best_thresh_first then puts the absolute best threshold first, rest still arbitrary order
+        void computeOptimalThreshes(
+            const SampleVec& samples,
             const Eigen::MatrixXd& sample_feature_scores,
             const Eigen::Matrix<uint8_t, Eigen::Dynamic, 1>& sample_parts,
-            int feature_id, int start, int end, float* optimal_thresh) {
+            int feature_id, std::vector<std::array<float, 2> >& optimal_threshes,
+            bool place_best_thresh_first = false) {
 
             // Initially everything is in left set
             RTree::Distribution distLeft(numParts), distRight(numParts);
@@ -497,12 +644,12 @@ namespace ark {
 
             // Compute scores
             std::vector<std::pair<float, int> > samplesByScore;
-            samplesByScore.reserve(end-start);
-            for (int i = start; i < end; ++i) {
+            samplesByScore.reserve(samples.size());
+            for (size_t i = 0; i < samples.size(); ++i) {
                 const Sample& sample = samples[i];
                 samplesByScore.emplace_back(
-                        sample_feature_scores(i - start, feature_id), i);
-                uint8_t samplePart = sample_parts(i - start);
+                        sample_feature_scores(i, feature_id), i);
+                uint8_t samplePart = sample_parts(i);
                 if (samplePart >= distLeft.size()) {
                     std::cerr << "FATAL: Invalid sample " << int(samplePart) << " detected during RTree training, "
                                  "please check the randomization code\n";
@@ -516,25 +663,21 @@ namespace ark {
             std::sort(samplesByScore.begin(), samplesByScore.end(), scoreComp);
 
             // Start everything in the left set ...
-            float bestInfoGain = -FLT_MAX;
-            *optimal_thresh = samplesByScore[0].first;
-            size_t step = std::max<size_t>(samplesByScore.size() / samplesPerFeature, 1);
             float lastScore = -FLT_MAX;
             for (size_t i = 0; i < samplesByScore.size()-1; ++i) {
                 // Update distributions for left, right sets
                 int idx = samplesByScore[i].second;
-                uint8_t samplePart = sample_parts(idx - start);
+                uint8_t samplePart = sample_parts(idx);
                 distLeft[samplePart] -= 1.f;
                 distRight[samplePart] += 1.f;
-                if (i%step != 0 || lastScore == samplesByScore[i].first)
-                    continue;
+                if (lastScore == samplesByScore[i].first) continue;
                 lastScore = samplesByScore[i].first;
 
                 float left_entropy = entropy(distLeft / distLeft.sum());
                 float right_entropy = entropy(distRight / distRight.sum());
                 // Compute the information gain
-                float infoGain = - ((end - start - i - 1) * left_entropy
-                                 + (i+1)                  * right_entropy);
+                float infoGain = - ((samples.size() - i - 1) * left_entropy
+                                 + (i+1)                     * right_entropy);
                 if (infoGain > 0) {
                     std::cerr << "FATAL: Possibly overflow detected during training, exiting. Internal data: left entropy "
                         << left_entropy << " right entropy "
@@ -542,13 +685,15 @@ namespace ark {
                         << infoGain<< "\n";
                     std::exit(2);
                 }
-                if (infoGain > bestInfoGain) {
-                    // If better then update optimal thresh to between samples
-                    *optimal_thresh = random_util::uniform(samplesByScore[i].first, samplesByScore[i+1].first);
-                    bestInfoGain = infoGain;
-                }
+                // Add to candidate threshes
+                optimal_threshes.push_back({infoGain, random_util::uniform(samplesByScore[i].first, samplesByScore[i+1].first)});
             }
-            return bestInfoGain;
+            std::nth_element(optimal_threshes.begin(), optimal_threshes.begin() + threshesPerFeature,
+                             optimal_threshes.end(), std::greater<std::array<float, 2> >());
+            optimal_threshes.resize(threshesPerFeature);
+            if (place_best_thresh_first) {
+                std::nth_element(optimal_threshes.begin(), optimal_threshes.begin() + 1, optimal_threshes.end(), std::greater<std::array<float, 2> >());
+            }
         }
 
         void initTraining(int num_images, int num_points_per_image, int max_tree_depth) {
@@ -643,7 +788,7 @@ namespace ark {
         DataLoader<DataSource> dataLoader;
 
         bool verbose;
-        int numImages, numFeatures, maxProbeOffset, minSamples, numThreads, samplesPerFeature;
+        int numImages, numFeatures, maxProbeOffset, minSamples, numThreads, samplesPerFeature, threshesPerFeature;
 
         // const int SAMPLES_PER_FEATURE = 60;
         std::vector<int> chosenImages;
@@ -923,6 +1068,7 @@ namespace ark {
                    int min_samples, 
                    int max_tree_depth,
                    int samples_per_feature,
+                   int threshes_per_feature,
                    int max_images_loaded,
                    const std::string& samples_file,
                    bool generate_samples_file_only
@@ -935,7 +1081,8 @@ namespace ark {
             trainer.readSamples(samples_file, verbose);
         }
         trainer.train(num_images, num_points_per_image, num_features,
-                max_probe_offset, min_samples, max_tree_depth, samples_per_feature, num_threads, verbose, shouldReadSamples, generate_samples_file_only);
+                max_probe_offset, min_samples, max_tree_depth, samples_per_feature, threshes_per_feature,
+                num_threads, verbose, shouldReadSamples, generate_samples_file_only);
         if (generate_samples_file_only) {
             trainer.writeSamples(samples_file);
         }
@@ -954,6 +1101,7 @@ namespace ark {
                    int min_samples, 
                    int max_tree_depth,
                    int samples_per_feature,
+                   int threshes_per_feature,
                    const int* part_map,
                    int max_images_loaded,
                    const std::string& samples_file,
@@ -967,7 +1115,8 @@ namespace ark {
             trainer.readSamples(samples_file, verbose);
         }
         trainer.train(num_images, num_points_per_image, num_features,
-                max_probe_offset, min_samples, max_tree_depth, samples_per_feature, num_threads, verbose, shouldReadSamples, generate_samples_file_only);
+                max_probe_offset, min_samples, max_tree_depth, samples_per_feature,
+                threshes_per_feature, num_threads, verbose, shouldReadSamples, generate_samples_file_only);
         if (generate_samples_file_only) {
             trainer.writeSamples(samples_file);
         }

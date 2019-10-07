@@ -12,7 +12,8 @@ constexpr char WIND_NAME[] = "Image";
 int main(int argc, char** argv) { 
     std::string data_path, output_path, intrin_path, samples_file;
     bool verbose, preload, generate_samples_only;
-    int num_threads, num_images, num_points_per_image, num_features, max_probe_offset, min_samples, max_tree_depth, samples_per_feature, cache_size;
+    int num_threads, num_images, num_points_per_image, num_features, max_probe_offset, min_samples, max_tree_depth,
+        samples_per_feature, threshes_per_feature, cache_size;
     cv::Size size;
 
     namespace po = boost::program_options;
@@ -34,9 +35,11 @@ int main(int argc, char** argv) {
         ("probe,b", po::value<int>(&max_probe_offset)->default_value(170), "Maximum probe offset for random feature generation. "
                             "Noted in Kinect paper that cost 'levels off around >=129' but hyperparameter value not provided")
         ("min_samples,m", po::value<int>(&min_samples)->default_value(1), "Minimum number of samples of a child to declare current node a leaf")
-        ("samples_per_feature", po::value<int>(&samples_per_feature)->default_value(60),
-          "Maximum number of samples (may be +-1 in practice) to optimize feature score threshold over for each feature; "
-          "higher is more optimal but slower. Kinect used 50")
+        ("samples_per_feature", po::value<int>(&samples_per_feature)->default_value(150),
+          "Maximum number of samples to use in each node training step to quickly propose thresholds. (Different from Kinect; name is terrible, "
+          "should really be something like 'subsamples per node')")
+        ("threshes_per_feature", po::value<int>(&samples_per_feature)->default_value(30),
+          "Maximum number of candidates thresholds to optimize over for each feature (different from kinect)")
         ("depth,d", po::value<int>(&max_tree_depth)->default_value(20), "Maximum tree depth; Kinect used 20")
         ("width", po::value<int>(&size.width)->default_value(1280), "Width of generated images; only useful if using synthetic data input")
         ("height", po::value<int>(&size.height)->default_value(720), "Height of generated imaes; only useful if using synthetic data input")
@@ -110,11 +113,11 @@ int main(int argc, char** argv) {
             intrin.cy = 366.992;
         }
         rtree.trainFromAvatar(model, poseSequence, intrin, size, num_threads, verbose, num_images, num_points_per_image,
-                num_features, max_probe_offset, min_samples, max_tree_depth, samples_per_feature, ark::part_map::SMPL_JOINT_TO_PART_MAP, cache_size,
+                num_features, max_probe_offset, min_samples, max_tree_depth, samples_per_feature, threshes_per_feature, ark::part_map::SMPL_JOINT_TO_PART_MAP, cache_size,
                 samples_file, generate_samples_only);
     } else {
         rtree.train(data_path + "/depth_exr", data_path + "/part_mask", num_threads, verbose, num_images, num_points_per_image,
-                num_features, max_probe_offset, min_samples, max_tree_depth, samples_per_feature, cache_size, samples_file, generate_samples_only);
+                num_features, max_probe_offset, min_samples, max_tree_depth, samples_per_feature, threshes_per_feature, cache_size, samples_file, generate_samples_only);
     }
     rtree.exportFile(output_path);
 

@@ -86,10 +86,22 @@ namespace ark {
 
         template<class T, class A>
         /** Choose k elements from a vector */
-        std::vector<T, A> choose(std::vector<T, A> & source, int k) {
+        std::vector<T, A> choose(std::vector<T, A> & source, size_t k) {
             std::vector<T, A> out;
-            for (int j = 0; j < std::min<int>(k, source.size()); ++j) {
-                int r = randint(j, static_cast<int>(source.size()) - 1); 
+            for (size_t j = 0; j < std::min(k, source.size()); ++j) {
+                int r = randint(j, source.size() - 1); 
+                out.push_back(source[r]);
+                std::swap(source[j], source[r]);
+            }   
+            return out;
+        }
+
+        template<class T, class A>
+        /** Choose k elements from an interval (inclusive on left, exclusive right) of a vector */
+        std::vector<T, A> choose(std::vector<T, A> & source, size_t l, size_t r, size_t k) {
+            std::vector<T, A> out;
+            for (size_t j = l; j < std::min(k, r); ++j) {
+                int r = randint(j, source.size() - 1); 
                 out.push_back(source[r]);
                 std::swap(source[j], source[r]);
             }   
