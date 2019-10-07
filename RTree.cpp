@@ -285,7 +285,7 @@ namespace ark {
                 int imgIndex, imgSamps;
                 util::read_bin(ifs, imgIndex);
                 util::read_bin(ifs, imgSamps);
-                if (verbose && imgIndex % 20 == 0 && imgIndex >= 0) {
+                if (verbose && imgIndex % 200 == 0 && imgIndex >= 0) {
                     std::cout << "Reading samples for image #" << imgIndex << " with " << imgSamps << " sample pixels\n";
                 }
                 if (!ifs || imgSamps < 0) break;
