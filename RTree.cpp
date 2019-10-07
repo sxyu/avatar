@@ -285,7 +285,7 @@ namespace ark {
                 int imgIndex, imgSamps;
                 util::read_bin(ifs, imgIndex);
                 util::read_bin(ifs, imgSamps);
-                if (verbose && imgIndex % 200 == 0 && imgIndex >= 0) {
+                if (verbose && imgIndex % 1000 == 0 && imgIndex >= 0) {
                     std::cout << "Reading samples for image #" << imgIndex << " with " << imgSamps << " sample pixels\n";
                 }
                 if (!ifs || imgSamps < 0) break;
@@ -435,7 +435,7 @@ namespace ark {
                         if (featureCount <= 0) break;
 
                         if (verbose && end-start > 500 &&
-                                featureCount % 1000 == 0) {
+                                featureCount % 5000 == 0) {
                             std::cout << " Sparse features to evaluate: " << featureCount << "\n";
                         }
                         featureId = --featureCount;
@@ -512,8 +512,8 @@ namespace ark {
                     }
                     for (size_t sampleId = left; sampleId < right; ++sampleId) {
                         ++sampleCount;
-                        if (verbose && end-start > 500 &&
-                                sampleCount % 5000 == 0) {
+                        if (verbose && end-start > 5000 &&
+                                sampleCount % 100000 == 0) {
                             std::cout << " Samples evaluated: " << sampleCount << " of " << end-start << " [potentially inaccurate]\n";
                         }
                         auto& sample = samples[sampleId];
