@@ -560,7 +560,7 @@ namespace ark {
                                     << infoGain<< "\n";
                                 std::exit(2);
                             }
-                            if (infoGain > featureBestThresh) {
+                            if (infoGain > featureBestInfoGain) {
                                 featureBestInfoGain = infoGain;
                                 featureBestThresh = featureThreshes[featureId][threshId][1];
                             }
