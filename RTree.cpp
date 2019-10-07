@@ -348,15 +348,20 @@ namespace ark {
             if (verbose && end-start > 500) {
                 std::cout << "Allocating memory and sampling...\n";
             }
-            SampleVec subsamples, _tmp;
-            _tmp.reserve(end-start);
-            // Copy then sample is less costly than sorting again
-            std::copy(samples.begin() + start, samples.begin() + end, std::back_inserter(_tmp));
-            subsamples = random_util::choose(_tmp, samplesPerFeature);
-            {
-                SampleVec _; _tmp.swap(_); // Free memory of copy
+            SampleVec subsamples;
+            subsamples.reserve(samplesPerFeature);
+            if (end-start <= samplesPerFeature) {
+                // Use all samples
+                std::copy(samples.begin() + start, samples.begin() + end, std::back_inserter(subsamples));
+            } else {
+                SampleVec _tmp;
+                _tmp.reserve(end-start);
+                // Choose sparse subset of samples
+                // Copy then sample is less costly than sorting again
+                std::copy(samples.begin() + start, samples.begin() + end, std::back_inserter(_tmp));
+                subsamples = random_util::choose(_tmp, samplesPerFeature);
+                reorderByImage(subsamples, 0, subsamples.size());
             }
-            reorderByImage(subsamples, 0, subsamples.size());
             Eigen::MatrixXd sampleFeatureScores(subsamples.size(), numFeatures);
             Eigen::Matrix<uint8_t, Eigen::Dynamic, 1> sampleParts(subsamples.size());
             if (verbose && end-start > 500) {

@@ -18,7 +18,7 @@ int main(int argc, char** argv) {
 
     namespace po = boost::program_options;
     po::options_description desc("Option arguments");
-    po::options_description descPositional("OpenARK random tree/forest training tool v0.1 (c) Alex Yu 2019\nPositional arguments");
+    po::options_description descPositional("OpenARK random tree/forest training tool v0.2 (c) Alex Yu 2019\nPositional arguments");
     po::options_description descCombined("");
 
     desc.add_options()
