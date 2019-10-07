@@ -567,7 +567,7 @@ namespace ark {
                         }
                         {
                             std::lock_guard<std::mutex> lock(trainMutex);
-                            if (featureBestThresh > bestThresh) {
+                            if (featureBestInfoGain > bestInfoGain) {
                                 bestInfoGain = featureBestInfoGain;
                                 bestFeature = feature;
                                 bestThresh = featureBestThresh;
