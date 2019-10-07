@@ -820,7 +820,7 @@ namespace ark {
     void AvatarPoseSequence::poseAvatar(Avatar& ava, size_t frame_id) const {
         if (preloaded) {
             auto frameData = data.col(frame_id);
-            ava.p = frameData.head<3>();
+            ava.p.noalias() = frameData.head<3>();
             Eigen::Quaterniond q;
             for (int i = 0; i < ava.r.size(); ++i) { 
                 q.coeffs().noalias() = frameData.segment<4>(i * 4 + 3);

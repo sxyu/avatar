@@ -187,6 +187,7 @@ namespace ark {
     public:
         struct Feature {
             RTree::Vec2 u, v;
+            EIGEN_MAKE_ALIGNED_OPERATOR_NEW
         };
 
         Trainer() =delete;
@@ -320,37 +321,105 @@ namespace ark {
             }
 
             bool preloaded = dataLoader.preload(samples, start, end, numThreads);
+            using FeatureVec = std::vector<Feature, Eigen::aligned_allocator<Feature> >; 
+            FeatureVec candidateFeatures;
+            candidateFeatures.resize(numFeatures);
+
+            static const double MIN_PROBE = 0.1;
+            // Create random features
+            for (auto& feature : candidateFeatures) {  
+                // Create random feature in-place
+                feature.u.x() =
+                    random_util::uniform(-maxProbeOffset + MIN_PROBE, maxProbeOffset - MIN_PROBE);
+                feature.u.x() += (feature.u.x() >= 0.0 ? MIN_PROBE : -MIN_PROBE);
+                feature.u.y() = random_util::uniform(-maxProbeOffset + MIN_PROBE, maxProbeOffset - MIN_PROBE);
+                feature.u.y() += (feature.u.y() >= 0.0 ? MIN_PROBE : -MIN_PROBE);
+                feature.v.x() = random_util::uniform(-maxProbeOffset + MIN_PROBE, maxProbeOffset - MIN_PROBE);
+                feature.v.x() += (feature.v.x() >= 0.0 ? MIN_PROBE : -MIN_PROBE);
+                feature.v.y() = random_util::uniform(-maxProbeOffset + MIN_PROBE, maxProbeOffset - MIN_PROBE);
+                feature.v.y() += (feature.v.y() >= 0.0 ? MIN_PROBE : -MIN_PROBE);
+            }
+
+            // Precompute features scores
+            Eigen::MatrixXd sampleFeatureScores(end - start, numFeatures);
+            Eigen::Matrix<uint8_t, Eigen::Dynamic, 1> sampleParts(end - start);
+
+            std::vector<std::thread> threadMgr;
+
+            if (verbose) {
+                std::cerr << "Computing features...\n";
+            }
+            int sampleCount = start;
+            auto precomputeWorker = [&]() {
+                int sampleId;
+                while (true) {
+                    {
+                        std::lock_guard<std::mutex> lock(trainMutex);
+                        if (sampleCount >= end) break;
+                        sampleId = sampleCount++;
+                        if (verbose && end-start > 50000 &&
+                                (sampleCount - start) % 10000 == 0) {
+                            std::cerr << " Computing features for sample " << sampleCount - start <<
+                                " of " << end-start << "\n";
+                        }
+                    };
+                    auto& sample = samples[sampleId];
+                    const auto& dataArr = dataLoader.get(sample);
+
+                    sampleParts(sampleId) = dataArr[DATA_PART_MASK]
+                            .template at<uint8_t>(sample.pix[1], sample.pix[0]);
+
+                    for (int featureId = 0; featureId < numFeatures; ++featureId) {
+                        auto& feature = candidateFeatures[featureId];
+                        sampleFeatureScores(sampleId, featureId) =
+                            scoreByFeature(dataArr[DATA_DEPTH],
+                                    sample.pix, feature.u, feature.v);
+                    }
+                }
+            };
+
+            for (int i = 0; i < numThreads; ++i) {
+                threadMgr.emplace_back(precomputeWorker);
+            }
+            for (int i = 0; i < numThreads; ++i) {
+                threadMgr[i].join();
+            }
+            threadMgr.clear();
+
+            if (verbose) {
+                std::cerr << "Optimizing information gain...\n";
+            }
+
+            // Find best information gain
             int featureCount = numFeatures;
             Eigen::VectorXf bestInfoGains(numThreads, 1);
             Eigen::VectorXf bestThreshs(numThreads, 1);
             bestInfoGains.setConstant(-FLT_MAX);
-            std::vector<Feature> bestFeatures(numThreads);
+            FeatureVec bestFeatures(numThreads);
 
             auto worker = [&](int thread_id) {
                 float& bestInfoGain = bestInfoGains(thread_id);
                 float& bestThresh = bestThreshs(thread_id);
                 Feature& bestFeature = bestFeatures[thread_id];
-                Feature feature;
+                int featureId ;
                 while (true) {
                     {
                         std::lock_guard<std::mutex> lock(trainMutex);
                         if (featureCount <= 0) break;
-                        --featureCount;
+
                         if (verbose && end-start > 50000 &&
-                            ((preloaded && featureCount % 500 == 0) ||
-                            (!preloaded && featureCount % 10 == 0))) {
-                            std::cerr << featureCount << " features left to evaluate\n";
+                                featureCount % 100 == 0) {
+                            std::cerr << " Candidate features to evaluate: " << featureCount << "\n";
                         }
+                        featureId = --featureCount;
                     }
 
-                    // Create random feature in-place
-                    feature.u.x() = random_util::uniform(1.0, maxProbeOffset) * (random_util::randint(0, 2) * 2 - 1);
-                    feature.u.y() = random_util::uniform(1.0, maxProbeOffset) * (random_util::randint(0, 2) * 2 - 1);
-                    feature.v.x() = random_util::uniform(1.0, maxProbeOffset) * (random_util::randint(0, 2) * 2 - 1);
-                    feature.v.y() = random_util::uniform(1.0, maxProbeOffset) * (random_util::randint(0, 2) * 2 - 1);
-
+                    auto& feature = candidateFeatures[featureId];
                     float optimalThresh;
-                    float infoGain = optimalInformationGain(start, end, feature, &optimalThresh);
+                    float infoGain =
+                        optimalInformationGain(
+                                sampleFeatureScores, sampleParts,
+                                featureId, start, end, &optimalThresh);
 
                     if (infoGain >= bestInfoGain) {
                         bestInfoGain = infoGain;
@@ -360,7 +429,6 @@ namespace ark {
                 }
             };
 
-            std::vector<std::thread> threadMgr;
             for (int i = 0; i < numThreads; ++i) {
                 threadMgr.emplace_back(worker, i);
             }
@@ -417,7 +485,10 @@ namespace ark {
         }
 
         // Compute information gain (mutual information scaled and shifted) by choosing optimal threshold
-        float optimalInformationGain(int start, int end, const Feature& feature, float* optimal_thresh) {
+        float optimalInformationGain(
+            const Eigen::MatrixXd& sample_feature_scores,
+            const Eigen::Matrix<uint8_t, Eigen::Dynamic, 1>& sample_parts,
+            int feature_id, int start, int end, float* optimal_thresh) {
 
             // Initially everything is in left set
             RTree::Distribution distLeft(numParts), distRight(numParts);
@@ -426,18 +497,12 @@ namespace ark {
 
             // Compute scores
             std::vector<std::pair<float, int> > samplesByScore;
-            std::vector<int> sampleParts;
             samplesByScore.reserve(end-start);
-            sampleParts.reserve(end-start);
             for (int i = start; i < end; ++i) {
                 const Sample& sample = samples[i];
-                const auto& dataArr = dataLoader.get(sample);
                 samplesByScore.emplace_back(
-                        scoreByFeature(dataArr[DATA_DEPTH],
-                            sample.pix, feature.u, feature.v) , i);
-                uint8_t samplePart = dataArr[DATA_PART_MASK]
-                    .template at<uint8_t>(sample.pix[1], sample.pix[0]);
-                sampleParts.push_back(samplePart);
+                        sample_feature_scores(i - start, feature_id), i);
+                uint8_t samplePart = sample_parts(i - start);
                 if (samplePart >= distLeft.size()) {
                     std::cerr << "FATAL: Invalid sample " << int(samplePart) << " detected during RTree training, "
                                  "please check the randomization code\n";
@@ -458,8 +523,7 @@ namespace ark {
             for (size_t i = 0; i < samplesByScore.size()-1; ++i) {
                 // Update distributions for left, right sets
                 int idx = samplesByScore[i].second;
-                const Sample& sample = samples[idx];
-                auto samplePart = sampleParts[idx - start];
+                uint8_t samplePart = sample_parts(idx - start);
                 distLeft[samplePart] -= 1.f;
                 distRight[samplePart] += 1.f;
                 if (i%step != 0 || lastScore == samplesByScore[i].first)
@@ -684,7 +748,8 @@ namespace ark {
                 last_idx = idx;
                 if (poseSequence.numFrames) {
                     // random_util::randint<size_t>(0, poseSequence.numFrames - 1)
-                    poseSequence.poseAvatar(ava, seq[idx % poseSequence.numFrames]);
+                    int seqid = seq[idx % poseSequence.numFrames];
+                    poseSequence.poseAvatar(ava, seqid);
                     ava.r[0].setIdentity();
                     ava.randomize(false, true, true, idx);
                 } else {
