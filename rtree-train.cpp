@@ -38,7 +38,7 @@ int main(int argc, char** argv) {
         ("samples_per_feature", po::value<int>(&samples_per_feature)->default_value(150),
           "Maximum number of samples to use in each node training step to quickly propose thresholds. (Different from Kinect; name is terrible, "
           "should really be something like 'subsamples per node')")
-        ("threshes_per_feature", po::value<int>(&samples_per_feature)->default_value(30),
+        ("threshes_per_feature", po::value<int>(&threshes_per_feature)->default_value(30),
           "Maximum number of candidates thresholds to optimize over for each feature (different from kinect)")
         ("depth,d", po::value<int>(&max_tree_depth)->default_value(20), "Maximum tree depth; Kinect used 20")
         ("width", po::value<int>(&size.width)->default_value(1280), "Width of generated images; only useful if using synthetic data input")

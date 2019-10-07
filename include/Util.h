@@ -100,10 +100,10 @@ namespace ark {
         /** Choose k elements from an interval (inclusive on left, exclusive right) of a vector */
         std::vector<T, A> choose(std::vector<T, A> & source, size_t l, size_t r, size_t k) {
             std::vector<T, A> out;
-            for (size_t j = l; j < std::min(k, r); ++j) {
-                int r = randint(j, source.size() - 1); 
-                out.push_back(source[r]);
-                std::swap(source[j], source[r]);
+            for (size_t j = l; j < std::min(l+k, r); ++j) {
+                int ran = randint(j, r-1); 
+                out.push_back(source[ran]);
+                std::swap(source[j], source[ran]);
             }   
             return out;
         }   

@@ -20,10 +20,11 @@
 
 namespace {
     // Compute Shannon entropy of a distribution (must be normalized)
-    inline float entropy(const ark::RTree::Distribution & distr) {
+    template<class Distribution>
+    inline float entropy(const Distribution & distr) {
         // Can this be vectorized?
         float entropy = 0.f;
-        for (int i = 0; i < distr.rows(); ++i) {
+        for (int i = 0; i < distr.size(); ++i) {
             if (distr[i] < 1e-10) continue;
             entropy -= distr[i] * std::log2(distr[i]);
         }
@@ -101,9 +102,12 @@ namespace ark {
             for (int i = a + 1; i < b; ++i) {
                 if (samples[i].index != images.back()) {
                     images.push_back(samples[i].index);
+                    if (samples[i].index < images.back()) {
+                        std::cerr << "FATAL: Images not sorted at preload " <<a << "," << b << "\n";
+                        std::exit(0);
+                    }
                 }
             }
-            images.resize(std::unique(images.begin(), images.end()) - images.begin());
             if (images.size() > maxImagesLoaded) {
                 std::cerr << "INFO: Number of images too large (" << images.size() <<
                     " > " << maxImagesLoaded << "), not preloading\n";
@@ -238,7 +242,7 @@ namespace ark {
         void writeSamples(const std::string & path) {
             std::ofstream ofs(path, std::ios::out | std::ios::binary);
             dataLoader.dataSource.serialize(ofs);
-            reorderByImage(0, samples.size());
+            reorderByImage(samples, 0, samples.size());
             ofs.write("S\n", 2);
             size_t last_idx = 0;
             util::write_bin(ofs, samples.size());
@@ -298,12 +302,12 @@ namespace ark {
 
     private:
         std::mutex trainMutex;
-        void trainFromNode(RTree::RNode& node, int start, int end, uint32_t depth) {
+        void trainFromNode(RTree::RNode& node, size_t start, size_t end, uint32_t depth) {
             if (depth <= 1 || end - start <= minSamples) {
                 // Leaf
                 node.leafid = static_cast<int>(leafData.size());
                 if (verbose) {
-                    std::cerr << "Added leaf node: id=" << node.leafid << "\n";
+                    std::cout << "Added leaf node: id=" << node.leafid << "\n";
                 }
                 leafData.emplace_back();
                 leafData.back().resize(numParts);
@@ -317,7 +321,7 @@ namespace ark {
                 return;
             } 
             if (verbose) {
-                std::cerr << "Training internal node, remaining depth: " << depth <<
+                std::cout << "Training internal node, remaining depth: " << depth <<
                     ". Current data interval: " << start << " to " << end << "\n";
             }
 
@@ -341,30 +345,34 @@ namespace ark {
             }
 
             // Precompute features scores
-            if (verbose) {
-                std::cerr << "Allocating memory and sampling...\n";
+            if (verbose && end-start > 500) {
+                std::cout << "Allocating memory and sampling...\n";
             }
-            SampleVec subsamples;
-            subsamples = random_util::choose(samples, start, end, samplesPerFeature);
+            SampleVec subsamples, _tmp;
+            _tmp.reserve(end-start);
+            // Copy then sample is less costly than sorting again
+            std::copy(samples.begin() + start, samples.begin() + end, std::back_inserter(_tmp));
+            subsamples = random_util::choose(_tmp, samplesPerFeature);
+            {
+                SampleVec _; _tmp.swap(_); // Free memory of copy
+            }
+            reorderByImage(subsamples, 0, subsamples.size());
             Eigen::MatrixXd sampleFeatureScores(subsamples.size(), numFeatures);
             Eigen::Matrix<uint8_t, Eigen::Dynamic, 1> sampleParts(subsamples.size());
+            if (verbose && end-start > 500) {
+                std::cout << " > Preload " << subsamples.size() << " sparse samples\n";
+            }
             dataLoader.preload(subsamples, 0, subsamples.size(), numThreads);
 
             std::vector<std::thread> threadMgr;
 
-            if (verbose) {
-                std::cerr << "Computing features on sparse samples...\n";
+            if (verbose && end-start > 500) {
+                std::cout << "Computing features on sparse samples...\n";
             }
             size_t sampleCount = 0;
             // This worker loads and computes the pixel scores and parts for sparse features
-            auto sparseFeatureWorker = [&]() {
-                int sampleId;
-                while (true) {
-                    {
-                        std::lock_guard<std::mutex> lock(trainMutex);
-                        if (sampleCount >= subsamples.size()) break;
-                        sampleId = sampleCount++;
-                    };
+            auto sparseFeatureWorker = [&](size_t left, size_t right) {
+                for (size_t sampleId = left; sampleId < right; ++sampleId) {
                     auto& sample = subsamples[sampleId];
                     const auto& dataArr = dataLoader.get(sample);
 
@@ -380,16 +388,23 @@ namespace ark {
                 }
             };
 
-            for (int i = 0; i < numThreads; ++i) {
-                threadMgr.emplace_back(sparseFeatureWorker);
+            if (subsamples.size() < 50) {
+                // Better to not create threads
+                sparseFeatureWorker(0, subsamples.size());
+            } else {
+                size_t step = subsamples.size() / numThreads;
+                for (int i = 0; i < numThreads-1; ++i) {
+                    threadMgr.emplace_back(sparseFeatureWorker, step * i, step * (i + 1));
+                }
+                threadMgr.emplace_back(sparseFeatureWorker, step * (numThreads-1), subsamples.size());
+                for (int i = 0; i < numThreads; ++i) {
+                    threadMgr[i].join();
+                }
+                threadMgr.clear();
             }
-            for (int i = 0; i < numThreads; ++i) {
-                threadMgr[i].join();
-            }
-            threadMgr.clear();
 
-            if (verbose) {
-                std::cerr << "Optimizing information gain on sparse samples...\n";
+            if (verbose && end-start > 500) {
+                std::cout << "Optimizing information gain on sparse samples...\n";
             }
 
             // Find best information gain
@@ -414,9 +429,9 @@ namespace ark {
                         std::lock_guard<std::mutex> lock(trainMutex);
                         if (featureCount <= 0) break;
 
-                        if (verbose && end-start > 50000 &&
-                                featureCount % 100 == 0) {
-                            std::cerr << " Sparse features to evaluate: " << featureCount << "\n";
+                        if (verbose && end-start > 500 &&
+                                featureCount % 1000 == 0) {
+                            std::cout << " Sparse features to evaluate: " << featureCount << "\n";
                         }
                         featureId = --featureCount;
                     }
@@ -427,12 +442,6 @@ namespace ark {
                     computeOptimalThreshes(
                             subsamples, sampleFeatureScores, sampleParts,
                             featureId, featureThreshes[featureId], shortCircuitOnFeatureOpt);
-
-                    // if (infoGain >= bestInfoGain) {
-                        // bestInfoGain = infoGain;
-                        // bestThresh = optimalThresh;
-                        // bestFeature = feature;
-                    // }
                 }
             };
 
@@ -448,7 +457,14 @@ namespace ark {
 
             if (shortCircuitOnFeatureOpt) {
                 // Interval is very short (only has subsamples), reuse earlier computations
+                if (verbose) {
+                    std::cout << "Fast-forward evaluation for small node\n";
+                }
                 for (size_t featureId = 0; featureId < numFeatures; ++featureId) {
+                    if (featureThreshes[featureId].empty()) {
+                        std::cerr<< "WARNING: Encountered feature with no canditates thresholds (skipped)\n";
+                        continue;
+                    }
                     auto& bestFeatureThresh = featureThreshes[featureId][0];
                     if (bestFeatureThresh[0] > bestInfoGain) {
                         bestInfoGain = bestFeatureThresh[0];
@@ -458,8 +474,8 @@ namespace ark {
                 }
             } else {
                 // Interval is long
-                if (verbose) {
-                    std::cerr << "Computing part distributions for each candidate feature/threshold pair...\n";
+                if (verbose && end - start > 500) {
+                    std::cout << "Computing part distributions for each candidate feature/threshold pair...\n";
                 }
                 sampleFeatureScores.resize(0, 0);
                 sampleParts.resize(0);
@@ -467,7 +483,13 @@ namespace ark {
                     SampleVec _;
                     subsamples.swap(_);
                 }
+                if (verbose && end - start > 500) {
+                    std::cout << " > Maybe preload " << end-start << " samples\n";
+                }
                 bool preloaded = dataLoader.preload(samples, start, end, numThreads);
+                if (verbose && end - start > 500) {
+                    std::cout << "  > Preload decision: " << preloaded << "\n";
+                }
 
                 std::vector<Eigen::MatrixXi, Eigen::aligned_allocator<Eigen::MatrixXi> > featureThreshDist(numFeatures); 
                 for (int i = 0; i < numFeatures; ++i) {
@@ -475,17 +497,20 @@ namespace ark {
                     featureThreshDist[i].setZero();
                 }
 
-                threadMgr.clear();
-                sampleCount = start;
+                sampleCount = 0;
                 // Compute part distributions for each feature/threshold pair
-                auto featureDistributionWorker = [&]() {
-                    int sampleId;
-                    while (true) {
-                        {
-                            std::lock_guard<std::mutex> lock(trainMutex);
-                            if (sampleCount >= end) break;
-                            sampleId = sampleCount++;
-                        };
+                auto featureDistributionWorker = [&](size_t left, size_t right) {
+                    std::vector<Eigen::MatrixXi, Eigen::aligned_allocator<Eigen::MatrixXi> > threadFeatureDist(numFeatures); 
+                    for (int i = 0; i < numFeatures; ++i) {
+                        threadFeatureDist[i].resize(featureThreshes[i].size(), numParts * 2);
+                        threadFeatureDist[i].setZero();
+                    }
+                    for (size_t sampleId = left; sampleId < right; ++sampleId) {
+                        ++sampleCount;
+                        if (verbose && end-start > 500 &&
+                                sampleCount % 5000 == 0) {
+                            std::cout << " Samples evaluated: " << sampleCount << " of " << end-start << " [potentially inaccurate]\n";
+                        }
                         auto& sample = samples[sampleId];
                         const auto& dataArr = dataLoader.get(sample);
 
@@ -494,28 +519,34 @@ namespace ark {
 
                         for (int featureId = 0; featureId < numFeatures; ++featureId) {
                             auto& feature = candidateFeatures[featureId];
-                            auto& distMat = featureThreshDist[featureId];
+                            auto& distMat = threadFeatureDist[featureId];
                             float score = scoreByFeature(dataArr[DATA_DEPTH],
                                         sample.pix, feature.u, feature.v);
                             for (size_t threshId = 0; threshId < featureThreshes[featureId].size(); ++threshId) {
                                 uint32_t part = (score > featureThreshes[featureId][threshId][1]) ? samplePart : samplePart + numParts;
-                                {
-                                    std::lock_guard<std::mutex> lock(trainMutex);
-                                    ++distMat(threshId, part);
-                                }
+                                ++distMat(threshId, part);
                             }
                         }
                     }
+                {
+                    std::lock_guard<std::mutex> lock(trainMutex);
+                    for (int featureId = 0; featureId < numFeatures; ++featureId) {
+                        featureThreshDist[featureId].noalias() += threadFeatureDist[featureId];
+                    }
+                }
                 };
 
-                for (int i = 0; i < numThreads; ++i) {
-                    threadMgr.emplace_back(featureDistributionWorker);
+                size_t step = (end-start) / numThreads;
+                threadMgr.clear();
+                for (int i = 0; i < numThreads-1; ++i) {
+                    threadMgr.emplace_back(featureDistributionWorker, start + step * i, start + step * (i + 1));
                 }
+                threadMgr.emplace_back(featureDistributionWorker, start + step * (numThreads-1), end);
                 for (int i = 0; i < numThreads; ++i) {
                     threadMgr[i].join();
                 }
                 if (verbose) {
-                    std::cerr << "Finding optimal feature...\n";
+                    std::cout << "Finding optimal feature...\n";
                 }
                 threadMgr.clear();
 
@@ -530,9 +561,9 @@ namespace ark {
                             std::lock_guard<std::mutex> lock(trainMutex);
                             if (featureCount <= 0) break;
 
-                            if (verbose && end-start > 50000 &&
-                                    featureCount % 100 == 0) {
-                                std::cerr << " Candidate features to evaluate: " << featureCount << "\n";
+                            if (verbose && end-start > 500 &&
+                                    featureCount % 1000 == 0) {
+                                std::cout << " Candidate features to evaluate: " << featureCount << "\n";
                             }
                             featureId = --featureCount;
                         }
@@ -548,6 +579,7 @@ namespace ark {
 
                             float lsum = distLeft.sum();
                             float rsum = distRight.sum();
+                            if (lsum == 0 || rsum == 0) continue;
 
                             float leftEntropy = entropy(distLeft.template cast<float>() / lsum);
                             float rightEntropy = entropy(distRight.template cast<float>() / rsum);
@@ -583,12 +615,11 @@ namespace ark {
                 }
             }
 
-            int mid = split(start, end, bestFeature, bestThresh);
+            size_t mid = split(start, end, bestFeature, bestThresh);
 
             if (verbose) {
-                std::cerr << "> Best info gain " << bestInfoGain << ", thresh " << bestThresh << ", feature.u " << bestFeature.v.x() << "," << bestFeature.v.y() <<", features.v" << bestFeature.u.x() << "," << bestFeature.u.y() << "\n";
+                std::cout << "> Best info gain " << bestInfoGain << ", thresh " << bestThresh << ", feature.u " << bestFeature.v.x() << "," << bestFeature.v.y() <<", features.v " << bestFeature.u.x() << "," << bestFeature.u.y() << std::endl; // flush to make sure this is logged
             }
-            //std::cerr << bestThreadId << "BT thresh" << bestThreshs(bestThreadId) << ",u\n" << bestFeatures[bestThreadId].u << "\nv\n" <<bestFeatures[bestThreadId].v << "\n";
             if (mid == end || mid == start) {
                 // force leaf
                 trainFromNode(node, start, end, 0);
@@ -617,13 +648,23 @@ namespace ark {
             node.u = bestFeature.u;
             node.v = bestFeature.v;
 
+            // If the 'info gain' [actually is -(sum of conditional entropies)] was zero then
+            // it means all of children have same class, so we should stop
             node.lnode = static_cast<int>(nodes.size());
             nodes.emplace_back();
-            trainFromNode(nodes.back(), start, mid, depth - 1);
+            if (bestInfoGain == 0.0) {
+                trainFromNode(nodes.back(), start, mid, 0);
+            } else {
+                trainFromNode(nodes.back(), start, mid, depth - 1);
+            }
 
             node.rnode = static_cast<int>(nodes.size());
             nodes.emplace_back();
-            trainFromNode(nodes.back(), mid, end, depth - 1);
+            if (bestInfoGain == 0.0) {
+                trainFromNode(nodes.back(), mid, end, 0);
+            } else {
+                trainFromNode(nodes.back(), mid, end, depth - 1);
+            }
         }
 
         // Compute information gain (mutual information scaled and shifted) by choosing optimal threshold
@@ -661,6 +702,7 @@ namespace ark {
                 return a.first < b.first;
             };
             std::sort(samplesByScore.begin(), samplesByScore.end(), scoreComp);
+            // std::cerr << samplesByScore.size() << "\n";
 
             // Start everything in the left set ...
             float lastScore = -FLT_MAX;
@@ -688,9 +730,11 @@ namespace ark {
                 // Add to candidate threshes
                 optimal_threshes.push_back({infoGain, random_util::uniform(samplesByScore[i].first, samplesByScore[i+1].first)});
             }
-            std::nth_element(optimal_threshes.begin(), optimal_threshes.begin() + threshesPerFeature,
-                             optimal_threshes.end(), std::greater<std::array<float, 2> >());
-            optimal_threshes.resize(threshesPerFeature);
+            if (threshesPerFeature < optimal_threshes.size()) {
+                std::nth_element(optimal_threshes.begin(), optimal_threshes.begin() + threshesPerFeature,
+                        optimal_threshes.end(), std::greater<std::array<float, 2> >());
+                optimal_threshes.resize(threshesPerFeature);
+            }
             if (place_best_thresh_first) {
                 std::nth_element(optimal_threshes.begin(), optimal_threshes.begin() + 1, optimal_threshes.end(), std::greater<std::array<float, 2> >());
             }
@@ -731,9 +775,7 @@ namespace ark {
                     samples.emplace_back(chosenImages[i], v);
                 }
             }
-
-            // Note to future self: DO NOT SHUFFLE SAMPLES
-            // Order of samples is important for caching.
+  
             if(verbose) {
                 std::cerr << "Preprocessing done, sparsely verifying data validity before training...\n";
             }
@@ -752,9 +794,9 @@ namespace ark {
 
         // Split samples {start ... end-1} by feature+thresh in-place and return the dividing index
         // left (less) set willInit  be {start ... idx-1}, right (greater) set is {idx ... end-1}  
-        int split(int start, int end, const Feature& feature, float thresh) {
-            int nextIndex = start;
-            for (int i = start; i < end; ++i) {
+        size_t split(size_t start, size_t end, const Feature& feature, float thresh) {
+            size_t nextIndex = start;
+            for (size_t i = start; i < end; ++i) {
                 const Sample& sample = samples[i];
                 if (scoreByFeature(dataLoader.get(sample)[DATA_DEPTH],
                             sample.pix, feature.u, feature.v) < thresh) {
@@ -764,19 +806,19 @@ namespace ark {
                     ++nextIndex;
                 }
             }
-            reorderByImage(start, nextIndex);
-            reorderByImage(nextIndex, end);
+            reorderByImage(samples, start, nextIndex);
+            reorderByImage(samples, nextIndex, end);
             return nextIndex;
         }
 
         // Reorder samples in [start, ..., end-1] by image index to improve cache performance
-        void reorderByImage(int start, int end) {
-            int nextIndex = start;
+        void reorderByImage(SampleVec& samples, size_t start, size_t end) {
+            size_t nextIndex = start;
             static auto sampleComp = [](const Sample & a, const Sample & b) {
-                if (a.index == b.index) {
-                    if (a.pix[1] == b.pix[1]) return a.pix[0] < b.pix[0];
-                    return a.pix[1] < b.pix[1];
-                }
+                // if (a.index == b.index) {
+                //     if (a.pix[1] == b.pix[1]) return a.pix[0] < b.pix[0];
+                //     return a.pix[1] < b.pix[1];
+                // }
                 return a.index < b.index;
             };
             sort(samples.begin() + start, samples.begin() + end, sampleComp);
