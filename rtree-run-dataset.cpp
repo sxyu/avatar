@@ -1,5 +1,7 @@
 #include <iostream>
+#include <iomanip>
 #include <boost/program_options.hpp>
+#include <boost/filesystem.hpp>
 #include "opencv2/core.hpp"
 #include "opencv2/imgproc.hpp"
 #include "opencv2/highgui.hpp"
@@ -32,11 +34,12 @@ cv::Vec3b paletteColor(int color_index, bool bgr)
 int main(int argc, char** argv) {
 
     std::vector<std::string> model_paths;
-    std::string image_path;
+    std::string dataset_path;
+    int image_index;
 
     namespace po = boost::program_options;
     po::options_description desc("Option arguments");
-    po::options_description descPositional("OpenARK Random Tree/Forest empirical validation tool v0.1 (c) Alex Yu 2019\nPositional arguments");
+    po::options_description descPositional("OpenARK Random Tree/Forest empirical validation tool, for directly loading avatar dataset v0.1 (c) Alex Yu 2019\nPositional arguments");
     po::options_description descCombined("");
 
     desc.add_options()
@@ -44,7 +47,8 @@ int main(int argc, char** argv) {
     ;
 
     descPositional.add_options()
-        ("image", po::value<std::string>(&image_path)->required(), "Depth image (.exr) to run model on")
+        ("dataset", po::value<std::string>(&dataset_path)->required(), "Dataset root path (should have depth_exr, part_mask subdirs)")
+        ("image", po::value<int>(&image_index)->required(), "Image index to use")
         ("models", po::value<std::vector<std::string> >(&model_paths)->required(), "Model path (from rtree-train)")
         ;
 
@@ -53,6 +57,7 @@ int main(int argc, char** argv) {
     po::variables_map vm;
 
     po::positional_options_description posopt;
+    posopt.add("dataset", 1);
     posopt.add("image", 1);
     posopt.add("models", -1);
 
@@ -79,7 +84,6 @@ int main(int argc, char** argv) {
         std::cerr << descPositional << "\n" << desc << "\n";
         return 1;
     }
-    std::vector<cv::Mat> result;
 
     if (model_paths.empty()) {
         std::cerr << "Error: please specify at least one model path" << "\n";
@@ -87,41 +91,82 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    cv::Mat image = cv::imread(image_path, cv::IMREAD_ANYCOLOR | cv::IMREAD_ANYDEPTH);
+    using boost::filesystem::path;
+    using boost::filesystem::exists;
+    std::vector<ark::RTree> rtrees;
     for (auto& model_path: model_paths) {
-        ark::RTree rtree(model_path);
-        std::vector<cv::Mat> model_results = rtree.predict(image);
-        if (result.empty()) result = model_results;
-        else {
-            for (size_t i = 0; i < result.size(); ++i) {
-                result[i] += model_results[i];
-            }
-        }
+        rtrees.emplace_back(model_path);
     }
-    for (size_t i = 0; i < result.size(); ++i) {
-        result[i] /= model_paths.size();
-    }
+    bool show_mask = false;
+    while (true) {
+        std::cerr << image_index << " LOAD\n";
+        std::stringstream ss_img_id;
+        ss_img_id << std::setw(8) << std::setfill('0') << std::to_string(image_index);
 
-    cv::Mat maxVals(image.size(), CV_32F);
-    maxVals.setTo(0);
-    cv::Mat visual = cv::Mat::zeros(image.size(), CV_8UC3);
-    for (size_t i = 0; i < result.size(); ++i) {
-        for (int r = 0; r < image.rows; ++r) {
-            auto* imPtr = image.ptr<float>(r);
-            auto* inPtr = result[i].ptr<float>(r);
-            auto* maxValPtr = maxVals.ptr<float>(r);
-            auto* visualPtr = visual.ptr<cv::Vec3b>(r);
-            for (int c = 0; c < image.cols; ++c){
-                if (imPtr[c] == 0.0) continue;
-                if (inPtr[c] > maxValPtr[c]) {
-                    maxValPtr[c] = inPtr[c];
-                    visualPtr[c] = paletteColor(i, true);
+        if (show_mask) {
+            std::string mask_path = (path(dataset_path) / "part_mask" / ("part_mask_" + ss_img_id.str() + ".tiff")).string();
+            if (!exists(mask_path)) {
+                mask_path = (path(dataset_path) / "part_mask" / ("part_mask_" + ss_img_id.str() + ".png")).string();
+            }
+            cv::Mat mask = cv::imread(mask_path, cv::IMREAD_GRAYSCALE); 
+            cv::Mat mask_color = cv::imread(mask_path); 
+            for (int r = 0; r < mask.rows; ++r) {
+                auto* maskPtr = mask.ptr<uint8_t>(r);
+                auto* outPtr = mask_color.ptr<cv::Vec3b>(r);
+                for (int c = 0; c < mask.cols; ++c){
+                    outPtr[c] = paletteColor(maskPtr[c], true);
                 }
             }
+            cv::imshow(WIND_NAME, mask_color);
+        } else {
+            std::string image_path = (path(dataset_path) / "depth_exr" / ("depth_" + ss_img_id.str() + ".exr")).string();
+
+            cv::Mat image = cv::imread(image_path, cv::IMREAD_ANYCOLOR | cv::IMREAD_ANYDEPTH);
+            std::vector<cv::Mat> result;
+            for (auto& rtree : rtrees) {
+                std::vector<cv::Mat> model_results = rtree.predict(image);
+                if (result.empty()) result = model_results;
+                else {
+                    for (size_t i = 0; i < result.size(); ++i) {
+                        result[i] += model_results[i];
+                    }
+                }
+            }
+            for (size_t i = 0; i < result.size(); ++i) {
+                result[i] /= model_paths.size();
+            }
+
+            cv::Mat maxVals(image.size(), CV_32F);
+            maxVals.setTo(0);
+            cv::Mat visual = cv::Mat::zeros(image.size(), CV_8UC3);
+            for (size_t i = 0; i < result.size(); ++i) {
+                for (int r = 0; r < image.rows; ++r) {
+                    auto* imPtr = image.ptr<float>(r);
+                    auto* inPtr = result[i].ptr<float>(r);
+                    auto* maxValPtr = maxVals.ptr<float>(r);
+                    auto* visualPtr = visual.ptr<cv::Vec3b>(r);
+                    for (int c = 0; c < image.cols; ++c){
+                        if (imPtr[c] == 0.0) continue;
+                        if (inPtr[c] > maxValPtr[c]) {
+                            maxValPtr[c] = inPtr[c];
+                            visualPtr[c] = paletteColor(i, true);
+                        }
+                    }
+                }
+            }
+            cv::imshow(WIND_NAME, visual);
+        }
+
+        int k = cv::waitKey(0);
+        if (k == 'q' || k == 27) break;
+        else if (k == 'a' && image_index >= 0) {
+            --image_index;
+        } else if (k == 'd') {
+            ++image_index;
+        } else if (k == 'm') {
+            show_mask = !show_mask;
         }
     }
-    cv::imshow(WIND_NAME, visual);
-    cv::waitKey(0);
 
     /*
     for (size_t i = 0; i < result.size(); ++i) {
