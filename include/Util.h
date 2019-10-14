@@ -55,7 +55,7 @@ namespace ark {
 
         template<class T>
         /** Write binary to ostream */
-        inline T write_bin(std::ostream& os, T val) {
+        inline void write_bin(std::ostream& os, T val) {
             os.write(reinterpret_cast<char*>(&val), sizeof(T));
         }
 
