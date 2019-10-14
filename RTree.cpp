@@ -463,7 +463,7 @@ namespace ark {
             if (shortCircuitOnFeatureOpt) {
                 // Interval is very short (only has subsamples), reuse earlier computations
                 if (verbose) {
-                    std::cout << "Fast-forward evaluation for small node\n";
+                    std::cout << "Fast-forward evaluation for small node\n" << std::flush;
                 }
                 for (size_t featureId = 0; featureId < numFeatures; ++featureId) {
                     if (featureThreshes[featureId].empty()) {
@@ -493,7 +493,7 @@ namespace ark {
                 }
                 bool preloaded = dataLoader.preload(samples, start, end, numThreads);
                 if (verbose && end - start > 500) {
-                    std::cout << "  > Preload decision: " << preloaded << "\n";
+                    std::cout << "  > Preload decision: " << preloaded << "\n" << std::flush;
                 }
 
                 std::vector<Eigen::MatrixXi, Eigen::aligned_allocator<Eigen::MatrixXi> > featureThreshDist(numFeatures); 
@@ -551,7 +551,7 @@ namespace ark {
                     threadMgr[i].join();
                 }
                 if (verbose) {
-                    std::cout << "Finding optimal feature...\n";
+                    std::cout << "Finding optimal feature...\n" << std::flush;
                 }
                 threadMgr.clear();
 
