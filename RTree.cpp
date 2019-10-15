@@ -326,7 +326,7 @@ namespace ark {
                 } 
                 if (verbose) {
                     std::cout << "Training internal node, remaining depth: " << depth <<
-                        ". Current data interval: " << start << " to " << end << "\n";
+                        ". Current data interval: " << start << " to " << end << "\n" << std::flush;
                 }
 
                 using FeatureVec = std::vector<Feature, Eigen::aligned_allocator<Feature> >; 
@@ -349,7 +349,7 @@ namespace ark {
                 }
 
                 // Precompute features scores
-                if (verbose && end-start > 500) {
+                if (verbose && end-start > 1000) {
                     std::cout << "Allocating memory and sampling...\n";
                 }
                 SampleVec subsamples;
@@ -577,13 +577,13 @@ namespace ark {
                                 float rightEntropy = entropy(distRight.template cast<float>() / rsum);
                                 // Compute the information gain
                                 float infoGain = - lsum * leftEntropy - rsum * rightEntropy;
-                                if (infoGain > 0) {
-                                    std::cerr << "FATAL: Possibly overflow detected during training, exiting. Internal data: left entropy "
-                                        << leftEntropy << " right entropy "
-                                        << rightEntropy << " information gain "
-                                        << infoGain<< "\n";
-                                    std::exit(2);
-                                }
+                                // if (infoGain > 0) {
+                                //     std::cerr << "FATAL: Possibly overflow detected during training, exiting. Internal data: left entropy "
+                                //         << leftEntropy << " right entropy "
+                                //         << rightEntropy << " information gain "
+                                //         << infoGain<< "\n";
+                                //     std::exit(2);
+                                // }
                                 if (infoGain > featureBestInfoGain) {
                                     featureBestInfoGain = infoGain;
                                     featureBestThresh = featureThreshes[featureId][threshId][1];
@@ -613,6 +613,9 @@ namespace ark {
                     }
                 }
 
+                if (verbose && end-start > 1000) {
+                    std::cout << "Splitting data interval for child nodes.." << std::endl;
+                }
                 mid = split(start, end, bestFeature, bestThresh);
 
                 if (verbose) {
