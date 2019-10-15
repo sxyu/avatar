@@ -747,18 +747,15 @@ namespace ark {
                 random_util::choose(allImages, num_images) : std::move(allImages);
 
             // 2. Choose num_points_per_image random foreground pixels from each image,
-            size_t imageIndex = 0;
+            std::atomic<size_t> imageIndex(0);
             samples.reserve(num_points_per_image * num_images);
             auto worker = [&]() {
                 size_t i;
                 SampleVec threadSamples;
                 threadSamples.reserve(samples.size() / numThreads + 1);
                 while (true) {
-                    {
-                        std::lock_guard<std::mutex> lock(trainMutex);
-                        if (imageIndex >= chosenImages.size()) break;
-                        i = imageIndex++;
-                    }
+                    i = imageIndex++;
+                    if (i >= chosenImages.size()) break;
                     if (verbose && i % 20 == 19) {
                         std::cerr << "Preprocessing data: " << i+1 << " of " << num_images << "\n";
                     }

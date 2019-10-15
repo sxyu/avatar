@@ -2,6 +2,7 @@
 
 #include <vector>
 #include <mutex>
+#include <atomic>
 #include <iostream>
 #include <Eigen/StdVector>
 #include <ceres/ceres.h>
@@ -269,15 +270,13 @@ namespace ark {
                         }
                     }
 
-                    // size_t lastCacheId = 0;
-                    // std::mutex cacheMutex;
-                    auto worker = [evaluate_jacobians, this](int workerId) {
-                        size_t workerCacheId = workerId;
+                    std::atomic<size_t> cacheId(0);
+                    auto worker = [evaluate_jacobians, &cacheId, this](int workerId) {
+                        size_t workerCacheId;
                         while (true) {
-                            // std::lock_guard<std::mutex> lock(cacheMutex);
+                            workerCacheId = cacheId++;
                             if (workerCacheId >= caches.size()) break;
                             caches[workerCacheId].updateData(evaluate_jacobians);
-                            workerCacheId += numThreads;
                         }
                     };
 
