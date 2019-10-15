@@ -4,6 +4,7 @@
 #include <chrono>
 #include <cstdio>
 #include <random>
+#include <atomic>
 #include <deque>
 #include <mutex>
 #include <iomanip>
@@ -99,33 +100,34 @@ namespace ark {
         bool preload(const SampleVec& samples, int a, int b, int numThreads) {
             std::vector<int> images;
             images.push_back(samples[a].index);
+            images.reserve((b-a - 1) / 2000 + 1); // HACK
+            size_t loadSize = data.size();
+
+            imageIdx.resize(dataSource.size(), -1);
             for (int i = a + 1; i < b; ++i) {
                 if (samples[i].index != images.back()) {
                     images.push_back(samples[i].index);
+                    if (imageIdx[samples[i].index] == -1) {
+                        ++loadSize;
+                    }
                     if (samples[i].index < images.back()) {
                         std::cerr << "FATAL: Images not sorted at preload " <<a << "," << b << "\n";
                         std::exit(0);
                     }
                 }
             }
+            if (loadSize - data.size() == 0) return true; // Already all loaded
             if (images.size() > maxImagesLoaded) {
                 std::cout << "INFO: Number of images too large (" << images.size() <<
                     " > " << maxImagesLoaded << "), not preloading\n";
                 return false;
-            }
-            
-            imageIdx.resize(dataSource.size(), -1);
+            } 
 
-            size_t loadSize = data.size();
-            for (int im : images) {
-                if (imageIdx[im] == -1) {
-                    loadSize += 1;
-                }
-            }
             if (loadSize > maxImagesLoaded) {
                 clear();
             } else {
                 std::vector<int> newImages;
+                newImages.reserve(loadSize);
                 for (int im : images) {
                     if (imageIdx[im] == -1) {
                         newImages.push_back(im);
@@ -137,18 +139,16 @@ namespace ark {
 
             std::vector<std::thread> threads;
             std::mutex mtx;
-            size_t i = 0, basei = data.size();
+            std::atomic<size_t> i(0);
+            size_t basei = data.size();
             data.resize(basei + images.size());
             revImageIdx.resize(basei + images.size());;
 
             auto worker = [&] {
                 size_t thread_i;
                 while (true) {
-                    {
-                        std::lock_guard<std::mutex> lock(mtx);
-                        if (i >= images.size()) break;
-                        thread_i = i++;
-                    }
+                    thread_i = i++;
+                    if (thread_i >= images.size()) break;
                     data[basei + thread_i] = dataSource.load(images[thread_i]);
                     imageIdx[images[thread_i]] = basei + thread_i;
                     revImageIdx[basei + thread_i] = images[thread_i];
@@ -378,7 +378,6 @@ namespace ark {
                 if (verbose && end-start > 500) {
                     std::cout << "Computing features on sparse samples...\n" << std::flush;
                 }
-                size_t sampleCount = 0;
                 // This worker loads and computes the pixel scores and parts for sparse features
                 auto sparseFeatureWorker = [&](size_t left, size_t right) {
                     for (size_t sampleId = left; sampleId < right; ++sampleId) {
@@ -419,7 +418,7 @@ namespace ark {
                 // Find best information gain
                 std::vector<std::vector<std::array<float, 2> > > featureThreshes(numFeatures);
 
-                int featureCount = numFeatures;
+                std::atomic<int> featureCount(numFeatures - 1);
 
                 bool shortCircuitOnFeatureOpt = end-start == subsamples.size();
 
@@ -427,15 +426,11 @@ namespace ark {
                 auto threshWorker = [&](int thread_id) {
                     int featureId;
                     while (true) {
-                        {
-                            std::lock_guard<std::mutex> lock(trainMutex);
-                            if (featureCount <= 0) break;
-
-                            if (verbose && end-start > 500 &&
-                                    featureCount % 5000 == 0) {
-                                std::cout << " Sparse features to evaluate: " << featureCount << "\n";
-                            }
-                            featureId = --featureCount;
+                        featureId = featureCount--;
+                        if (featureId < 0) break;
+                        if (verbose && end-start > 500 &&
+                                featureId % 5000 == 0) {
+                            std::cout << " Sparse features to evaluate: " << featureId << "\n";
                         }
 
                         auto& feature = candidateFeatures[featureId];
@@ -496,7 +491,7 @@ namespace ark {
                         featureThreshDist[i].setZero();
                     }
 
-                    sampleCount = start;
+                    std::atomic<size_t> sampleCount(start);
                     // Compute part distributions for each feature/threshold pair
                     auto featureDistributionWorker = [&]() {//size_t left, size_t right) 
                         std::vector<Eigen::MatrixXi, Eigen::aligned_allocator<Eigen::MatrixXi> > threadFeatureDist(numFeatures); 
@@ -506,12 +501,9 @@ namespace ark {
                         }
                         size_t sampleId;
                         while (true) {
-                            {
-                                std::lock_guard<std::mutex> lock(trainMutex);
-                                if (sampleCount >= end) break;
-                                sampleId = sampleCount++;
-                            }
-                        // for (size_t sampleId = left; sampleId < right; ++sampleId)
+                            sampleId = sampleCount++;
+                            if (sampleId >= end) break;
+                            // for (size_t sampleId = left; sampleId < right; ++sampleId)
                             if (verbose && end-start > 5000 &&
                                     (sampleId - start) % 100000 == 0) {
                                 std::cout << " Samples evaluated: " << (sampleId - start) << " of " << end-start << "\n";
@@ -542,7 +534,7 @@ namespace ark {
                         }
                     };
 
-                    size_t step = (end-start) / numThreads;
+                    // size_t step = (end-start) / numThreads;
                     threadMgr.clear();
                     for (int i = 0; i < numThreads; ++i) {
                         threadMgr.emplace_back(featureDistributionWorker);//, start + step * i, start + step * (i + 1));
@@ -554,23 +546,18 @@ namespace ark {
                     if (verbose) {
                         std::cout << "Finding optimal feature...\n" << std::flush;
                     }
-                    threadMgr.clear();
 
-                    featureCount = numFeatures;
+                    featureCount = numFeatures - 1;
                     auto featureOptWorker = [&]() {
                         int featureId;
                         float threadBestInfoGain = -FLT_MAX, threadBestThresh;
                         Feature threadBestFeature;
                         while (true) {
-                            {
-                                std::lock_guard<std::mutex> lock(trainMutex);
-                                if (featureCount <= 0) break;
-
-                                if (verbose && end-start > 500 &&
-                                        featureCount % 1000 == 0) {
-                                    std::cout << " Candidate features to evaluate: " << featureCount << "\n";
-                                }
-                                featureId = --featureCount;
+                            featureId = featureCount--;
+                            if (featureId < 0) break;
+                            if (verbose && end-start > 500 &&
+                                    featureId % 1000 == 0) {
+                                std::cout << " Candidate features to evaluate: " << featureId << "\n";
                             }
                             auto& feature = candidateFeatures[featureId];
                             auto& distMat = featureThreshDist[featureId];
@@ -617,6 +604,7 @@ namespace ark {
                             }
                         }
                     };
+                    threadMgr.clear();
                     for (int i = 0; i < numThreads; ++i) {
                         threadMgr.emplace_back(featureOptWorker);
                     }
@@ -1063,18 +1051,18 @@ namespace ark {
 
     bool RTree::exportFile(const std::string & path) {
         std::ofstream ofs(path);
-        ofs << std::fixed << std::setprecision(11);
+        ofs << std::fixed << std::setprecision(8);
         ofs << nodes.size() << " " << leafData.size() << " " << numParts << "\n";
         for (size_t i = 0; i < nodes.size(); ++i) {
             ofs << " " << nodes[i].leafid;
             if (nodes[i].leafid < 0) {
                 ofs << "  " << nodes[i].lnode <<
-                        " " << nodes[i].rnode <<
-                        " " << nodes[i].thresh <<
-                        " " << nodes[i].u[0] <<
-                        " " << nodes[i].u[1] <<
-                        " " << nodes[i].v[0] <<
-                        " " << nodes[i].v[1];
+                    " " << nodes[i].rnode <<
+                    " " << nodes[i].thresh <<
+                    " " << nodes[i].u[0] <<
+                    " " << nodes[i].u[1] <<
+                    " " << nodes[i].v[0] <<
+                    " " << nodes[i].v[1];
             }
             ofs << "\n";
         }
