@@ -17,7 +17,7 @@
 #include "AvatarRenderer.h"
 
 #define BEGIN_PROFILE auto _start = std::chrono::high_resolution_clock::now()
-#define PROFILE(x) do{printf("%s: %f ms\n", #x, std::chrono::duration<double, std::milli>(std::chrono::high_resolution_clock::now() - _start).count()); _start = std::chrono::high_resolution_clock::now(); }while(false)
+#define PROFILE(x) do{printf("* P %s: %f ms\n", #x, std::chrono::duration<double, std::milli>(std::chrono::high_resolution_clock::now() - _start).count()); _start = std::chrono::high_resolution_clock::now(); }while(false)
 
 namespace {
     // Compute Shannon entropy of a distribution (must be normalized)
@@ -48,13 +48,14 @@ namespace {
             const ark::RTree::Vec2i& pix,
             const ark::RTree::Vec2& u,
             const ark::RTree::Vec2& v) {
-            float sampleDepth = 
-                depth_image.at<float>(pix.y(), pix.x());
+            float sampleDepth = depth_image.at<float>(pix.y(), pix.x());
             // Add feature u,v and round
-            Eigen::Vector2f ut = u / sampleDepth, vt = v / sampleDepth;
+            // Eigen::Vector2f ut = u / sampleDepth, vt = v / sampleDepth;
             ark::RTree::Vec2i uti, vti;
-            uti << static_cast<int16_t>(std::round(ut.x())), static_cast<int16_t>(std::round(ut.y()));
-            vti << static_cast<int16_t>(std::round(vt.x())), static_cast<int16_t>(std::round(vt.y()));
+            uti[0] = static_cast<int16_t>(std::round(u.x() / sampleDepth));
+            uti[1] = static_cast<int16_t>(std::round(u.y() / sampleDepth));
+            vti[0] = static_cast<int16_t>(std::round(v.x() / sampleDepth));
+            vti[1] = static_cast<int16_t>(std::round(v.y() / sampleDepth));
             uti += pix; vti += pix;
             
             return (getDepth(depth_image, uti) - getDepth(depth_image, vti));
@@ -94,7 +95,7 @@ namespace ark {
      *             dataLoader.preload(samples, a, b, numThreads): preload images for samples if possible */
     struct DataLoader {
         DataSource& dataSource;
-        DataLoader(DataSource& data_source, int max_images_loaded) : dataSource(data_source), maxImagesLoaded(max_images_loaded) {}
+        DataLoader(DataSource& data_source, size_t max_images_loaded) : dataSource(data_source), maxImagesLoaded(max_images_loaded) {}
 
         /** Precondition: samples must be sorted by image index on [a, ..., b-1] */
         bool preload(const SampleVec& samples, int a, int b, int numThreads) {
@@ -110,10 +111,10 @@ namespace ark {
                     if (imageIdx[samples[i].index] == -1) {
                         ++loadSize;
                     }
-                    if (samples[i].index < images.back()) {
-                        std::cerr << "FATAL: Images not sorted at preload " <<a << "," << b << "\n";
-                        std::exit(0);
-                    }
+                    // if (samples[i].index < images.back()) {
+                    //     std::cerr << "FATAL: Images not sorted at preload " <<a << "," << b << "\n";
+                    //     std::exit(0);
+                    // }
                 }
             }
             if (loadSize - data.size() == 0) return true; // Already all loaded
@@ -144,7 +145,7 @@ namespace ark {
             data.resize(basei + images.size());
             revImageIdx.resize(basei + images.size());;
 
-            auto worker = [&] {
+            auto worker = [&]() {
                 size_t thread_i;
                 while (true) {
                     thread_i = i++;
@@ -163,11 +164,11 @@ namespace ark {
             return true;
         }
 
-        const std::array<cv::Mat, 2>& get(const Sample& sample) const {
-            int iidx = sample.index >= imageIdx.size() ? -1 : imageIdx[sample.index];
+        const std::array<cv::Mat, 2>& get(const Sample& sample, int hint = -1) const {
+            int iidx = sample.index >= static_cast<int>(imageIdx.size()) ?
+                         -1 : imageIdx[sample.index];
             if (iidx < 0) {
-                cv::Mat im0, im1;
-                return dataSource.load(sample.index);
+                return dataSource.load(sample.index, hint);
             }
             return data[iidx];
         }
@@ -182,7 +183,7 @@ namespace ark {
 
         std::vector<std::array<cv::Mat, 2> > data;
         std::vector<int> imageIdx, revImageIdx;
-        int maxImagesLoaded;
+        size_t maxImagesLoaded;
     };
 
     /** Internal trainer implementation */
@@ -202,9 +203,9 @@ namespace ark {
                 std::vector<RTree::Distribution>& leaf_data,
                 DataSource& data_source,
                 int num_parts,
-                int max_images_loaded)
-            : nodes(nodes), leafData(leaf_data),
-              dataLoader(data_source, max_images_loaded), numParts(num_parts) {
+                size_t max_images_loaded)
+            : nodes(nodes), leafData(leaf_data), numParts(num_parts),
+              dataLoader(data_source, max_images_loaded) {
         }
 
         void train(int num_images, int num_points_per_image, int num_features,
@@ -263,7 +264,7 @@ namespace ark {
             ofs.close();
         }
 
-        void readSamples(const std::string & path, bool verbose = false) {
+        void readSamples(const std::string & path, bool verbose = false, int max_num_images = -1) {
             std::ifstream ifs(path, std::ios::in | std::ios::binary);
             if (verbose) {
                 std::cout << "Recovering data source from samples file\n";
@@ -284,6 +285,10 @@ namespace ark {
             while (ifs) {
                 int imgIndex, imgSamps;
                 util::read_bin(ifs, imgIndex);
+                if (~max_num_images && imgIndex >= max_num_images) {
+                    std::cerr << "Image index " << imgIndex << " out of bounds, invalid samples file?\n";
+                    std::exit(0);
+                }
                 util::read_bin(ifs, imgSamps);
                 if (verbose && imgIndex % 1000 == 0 && imgIndex >= 0) {
                     std::cout << "Reading samples for image #" << imgIndex << " with " << imgSamps << " sample pixels\n";
@@ -307,8 +312,8 @@ namespace ark {
             float bestThresh, bestInfoGain = -FLT_MAX;
             Feature bestFeature;
             {
-                if (depth <= 1 || end - start <= minSamples) {
-                    // Leaf
+                // Add a leaf leaf
+                if (depth <= 1 || end - start <= static_cast<size_t>(minSamples)) {
                     node.leafid = static_cast<int>(leafData.size());
                     if (verbose) {
                         std::cout << "Added leaf node: id=" << node.leafid << "\n";
@@ -316,8 +321,8 @@ namespace ark {
                     leafData.emplace_back();
                     leafData.back().resize(numParts);
                     leafData.back().setZero();
-                    for (int i = start; i < end; ++i) {
-                        auto samplePart = dataLoader.get(samples[i])[DATA_PART_MASK]
+                    for (size_t i = start; i < end; ++i) {
+                        auto samplePart = dataLoader.get(samples[i], DATA_PART_MASK)[DATA_PART_MASK]
                             .template at<uint8_t>(samples[i].pix.y(), samples[i].pix.x());
                         leafData.back()(samplePart) += 1.f;
                     }
@@ -329,13 +334,14 @@ namespace ark {
                         ". Current data interval: " << start << " to " << end << "\n" << std::flush;
                 }
 
+                BEGIN_PROFILE;
                 using FeatureVec = std::vector<Feature, Eigen::aligned_allocator<Feature> >; 
                 FeatureVec candidateFeatures;
                 candidateFeatures.resize(numFeatures);
 
                 static const double MIN_PROBE = 0.1;
                 // Create random features
-                for (auto& feature : candidateFeatures) {  
+                for (auto& feature : candidateFeatures) {
                     // Create random feature in-place
                     feature.u.x() =
                         random_util::uniform(-maxProbeOffset + MIN_PROBE, maxProbeOffset - MIN_PROBE);
@@ -347,14 +353,16 @@ namespace ark {
                     feature.v.y() = random_util::uniform(-maxProbeOffset + MIN_PROBE, maxProbeOffset - MIN_PROBE);
                     feature.v.y() += (feature.v.y() >= 0.0 ? MIN_PROBE : -MIN_PROBE);
                 }
+                PROFILE(random features);
 
                 // Precompute features scores
                 if (verbose && end-start > 1000) {
                     std::cout << "Allocating memory and sampling...\n";
                 }
                 SampleVec subsamples;
+                // TODO: Optimize this to avoid copy (not really bottleneck)
                 subsamples.reserve(samplesPerFeature);
-                if (end-start <= samplesPerFeature) {
+                if (end-start <= static_cast<size_t>(samplesPerFeature)) {
                     // Use all samples
                     std::copy(samples.begin() + start, samples.begin() + end, std::back_inserter(subsamples));
                 } else {
@@ -366,6 +374,7 @@ namespace ark {
                     subsamples = random_util::choose(_tmp, samplesPerFeature);
                     reorderByImage(subsamples, 0, subsamples.size());
                 }
+                PROFILE(sampling + reorder);
                 Eigen::MatrixXd sampleFeatureScores(subsamples.size(), numFeatures);
                 Eigen::Matrix<uint8_t, Eigen::Dynamic, 1> sampleParts(subsamples.size());
                 if (verbose && end-start > 500) {
@@ -373,12 +382,12 @@ namespace ark {
                 }
                 dataLoader.preload(subsamples, 0, subsamples.size(), numThreads);
 
+                // CONCURRENT OP 1:
+                // This worker loads and computes the pixel scores and parts for sparse features
                 std::vector<std::thread> threadMgr;
-
                 if (verbose && end-start > 500) {
                     std::cout << "Computing features on sparse samples...\n" << std::flush;
                 }
-                // This worker loads and computes the pixel scores and parts for sparse features
                 auto sparseFeatureWorker = [&](size_t left, size_t right) {
                     for (size_t sampleId = left; sampleId < right; ++sampleId) {
                         auto& sample = subsamples[sampleId];
@@ -410,6 +419,7 @@ namespace ark {
                     }
                     threadMgr.clear();
                 }
+                PROFILE(sparse feature scores);
 
                 if (verbose && end-start > 500) {
                     std::cout << "Optimizing information gain on sparse samples...\n" << std::flush;
@@ -418,11 +428,11 @@ namespace ark {
                 // Find best information gain
                 std::vector<std::vector<std::array<float, 2> > > featureThreshes(numFeatures);
 
+                // CONCURRENT OP 2:
+                // This worker finds threshesPerSample optimal thresholds for each feature on the selected sparse features
                 std::atomic<int> featureCount(numFeatures - 1);
-
                 bool shortCircuitOnFeatureOpt = end-start == subsamples.size();
 
-                // This worker finds threshesPerSample optimal thresholds for each feature on the selected sparse features
                 auto threshWorker = [&](int thread_id) {
                     int featureId;
                     while (true) {
@@ -433,28 +443,29 @@ namespace ark {
                             std::cout << " Sparse features to evaluate: " << featureId << "\n";
                         }
 
-                        auto& feature = candidateFeatures[featureId];
-                        float optimalThresh;
                         // float infoGain =
                         computeOptimalThreshes(
                                 subsamples, sampleFeatureScores, sampleParts,
                                 featureId, featureThreshes[featureId], shortCircuitOnFeatureOpt);
                     }
                 };
-
                 for (int i = 0; i < numThreads; ++i) {
                     threadMgr.emplace_back(threshWorker, i);
                 }
                 for (int i = 0; i < numThreads; ++i) {
                     threadMgr[i].join();
                 }
+                PROFILE(sparse threshes);
 
+                // Depending on whether the current node is 'small'. we can either fast-forward
+                // (use samples from above to determine feature/threshold) or compute complete
+                // negative conditional entropy using all samples
                 if (shortCircuitOnFeatureOpt) {
                     // Interval is very short (only has subsamples), reuse earlier computations
                     if (verbose) {
                         std::cout << "Fast-forward evaluation for small node\n" << std::flush;
                     }
-                    for (size_t featureId = 0; featureId < numFeatures; ++featureId) {
+                    for (int featureId = 0; featureId < numFeatures; ++featureId) {
                         if (featureThreshes[featureId].empty()) {
                             std::cerr<< "WARNING: Encountered feature with no canditates thresholds (skipped)\n";
                             continue;
@@ -466,6 +477,7 @@ namespace ark {
                             bestFeature = candidateFeatures[featureId];
                         }
                     }
+                    PROFILE(fast forward);
                 } else {
                     // Interval is long
                     if (verbose && end - start > 500) {
@@ -484,34 +496,50 @@ namespace ark {
                     if (verbose && end - start > 500) {
                         std::cout << "  > Preload decision: " << preloaded << "\n" << std::flush;
                     }
+                    PROFILE(preload);
 
+                    // CONCURRENT OP 3:
                     std::vector<Eigen::MatrixXi, Eigen::aligned_allocator<Eigen::MatrixXi> > featureThreshDist(numFeatures); 
                     for (int i = 0; i < numFeatures; ++i) {
                         featureThreshDist[i].resize(featureThreshes[i].size(), numParts * 2);
                         featureThreshDist[i].setZero();
                     }
+                    PROFILE(alloc);
 
-                    std::atomic<size_t> sampleCount(start);
+                    // std::atomic<size_t> sampleCount(start);
+                    size_t sampleCount = 0;
                     // Compute part distributions for each feature/threshold pair
-                    auto featureDistributionWorker = [&]() {//size_t left, size_t right) 
+                    auto featureDistributionWorker = [&](size_t left, size_t right) {
                         std::vector<Eigen::MatrixXi, Eigen::aligned_allocator<Eigen::MatrixXi> > threadFeatureDist(numFeatures); 
                         for (int i = 0; i < numFeatures; ++i) {
                             threadFeatureDist[i].resize(featureThreshes[i].size(), numParts * 2);
                             threadFeatureDist[i].setZero();
                         }
-                        size_t sampleId;
-                        while (true) {
-                            sampleId = sampleCount++;
-                            if (sampleId >= end) break;
-                            // for (size_t sampleId = left; sampleId < right; ++sampleId)
+                        if (right > end || left < start) {
+                            std::cerr << "FATAL: Interval " << left << ", " << right << " is not valid\n";
+                            std::exit(0);
+                        }
+                        if (right <= left) return;
+                        for (size_t sampleId = left; sampleId < right; ++sampleId) {
+                            // sampleId = sampleCount++;
+                            // if (sampleId >= end) break;
                             if (verbose && end-start > 5000 &&
-                                    (sampleId - start) % 100000 == 0) {
-                                std::cout << " Samples evaluated: " << (sampleId - start) << " of " << end-start << "\n";
-                                if ((sampleId - start) % 1000000 == 0) std::cout << std::flush;
+                                    sampleId > left && 
+                                    (sampleId - left) % 10000 == 0) {
+                                sampleCount += 10000; // This is not really safe but for displaying only anyway
+                                std::cout << " Approx samples evaluated: " << sampleCount << " of " << end-start << "\n";
+                                if (sampleCount % 1000000 == 0) std::cout << std::flush;
                             }
                             auto& sample = samples[sampleId];
                             const auto& dataArr = dataLoader.get(sample);
 
+                            if (dataArr[DATA_PART_MASK].rows <= sample.pix[1] 
+                                    || dataArr[DATA_PART_MASK].cols <= sample.pix[0]
+                                    || dataArr[DATA_DEPTH].rows <= sample.pix[1] 
+                                    || dataArr[DATA_DEPTH].cols <= sample.pix[0]) {
+                                std::cerr << "FISHY\n";
+                                std::exit(1);
+                            }
                             uint32_t samplePart = dataArr[DATA_PART_MASK]
                                 .template at<uint8_t>(sample.pix[1], sample.pix[0]);
 
@@ -534,28 +562,36 @@ namespace ark {
                         }
                     };
 
-                    // size_t step = (end-start) / numThreads;
+                    // Probably better to use parallel for rather than atomic counter
+                    // since will result in less loads (better thread-local image cache, ref. load())
+                    size_t step = (end-start) / numThreads;
                     threadMgr.clear();
-                    for (int i = 0; i < numThreads; ++i) {
-                        threadMgr.emplace_back(featureDistributionWorker);//, start + step * i, start + step * (i + 1));
+                    for (int i = 0; i < numThreads - 1; ++i) {
+                        threadMgr.emplace_back(featureDistributionWorker,
+                                               start + step * i, start + step * (i + 1));
                     }
-                    // threadMgr.emplace_back(featureDistributionWorker, start + step * (numThreads-1), end);
+                    threadMgr.emplace_back(featureDistributionWorker, start + step * (numThreads-1), end);
                     for (int i = 0; i < numThreads; ++i) {
                         threadMgr[i].join();
                     }
-                    if (verbose) {
+                    PROFILE(feature distribution);
+                    // CONCURRENT OP 4:
+                    // finding optimal feature
+                    if (verbose && end-start > 500) {
                         std::cout << "Finding optimal feature...\n" << std::flush;
                     }
 
                     featureCount = numFeatures - 1;
                     auto featureOptWorker = [&]() {
                         int featureId;
-                        float threadBestInfoGain = -FLT_MAX, threadBestThresh;
+                        float threadBestInfoGain = -FLT_MAX, threadBestThresh = -1;
                         Feature threadBestFeature;
+                        threadBestFeature.u.setZero();
+                        threadBestFeature.v.setZero();
                         while (true) {
                             featureId = featureCount--;
                             if (featureId < 0) break;
-                            if (verbose && end-start > 500 &&
+                            if (verbose && end-start > 1000 &&
                                     featureId % 1000 == 0) {
                                 std::cout << " Candidate features to evaluate: " << featureId << "\n";
                             }
@@ -611,12 +647,14 @@ namespace ark {
                     for (int i = 0; i < numThreads; ++i) {
                         threadMgr[i].join();
                     }
+                    PROFILE(optimal feature);
                 }
 
                 if (verbose && end-start > 1000) {
                     std::cout << "Splitting data interval for child nodes.." << std::endl;
                 }
                 mid = split(start, end, bestFeature, bestThresh);
+                PROFILE(split);
 
                 if (verbose) {
                     std::cout << "> Best info gain " << bestInfoGain << ", thresh " << bestThresh << ", feature.u " << bestFeature.v.x() << "," << bestFeature.v.y() <<", features.v " << bestFeature.u.x() << "," << bestFeature.u.y() << std::endl; // flush to make sure this is logged
@@ -626,7 +664,6 @@ namespace ark {
                 // force leaf
                 trainFromNode(node, start, end, 0);
                 /*
-                std::cerr << "EVIL "<< start << " " << mid << " " << end << " \n";
                 std::cerr << bestFeatures[bestThreadId].u << " U\n";
                 std::cerr << bestFeatures[bestThreadId].v << " V\n";
                 std::cerr << bestThreshs << " Threshs\n";
@@ -689,7 +726,7 @@ namespace ark {
             std::vector<std::pair<float, int> > samplesByScore;
             samplesByScore.reserve(samples.size());
             for (size_t i = 0; i < samples.size(); ++i) {
-                const Sample& sample = samples[i];
+                // const Sample& sample = samples[i];
                 samplesByScore.emplace_back(
                         sample_feature_scores(i, feature_id), i);
                 uint8_t samplePart = sample_parts(i);
@@ -732,7 +769,7 @@ namespace ark {
                 // Add to candidate threshes
                 optimal_threshes.push_back({infoGain, random_util::uniform(samplesByScore[i].first, samplesByScore[i+1].first)});
             }
-            if (threshesPerFeature < optimal_threshes.size()) {
+            if (static_cast<size_t>(threshesPerFeature) < optimal_threshes.size()) {
                 std::nth_element(optimal_threshes.begin(), optimal_threshes.begin() + threshesPerFeature,
                         optimal_threshes.end(), std::greater<std::array<float, 2> >());
                 optimal_threshes.resize(threshesPerFeature);
@@ -762,7 +799,7 @@ namespace ark {
                     if (verbose && i % 20 == 19) {
                         std::cerr << "Preprocessing data: " << i+1 << " of " << num_images << "\n";
                     }
-                    cv::Mat mask = dataLoader.get(Sample(chosenImages[i], 0, 0))[DATA_PART_MASK];
+                    cv::Mat mask = dataLoader.get(Sample(chosenImages[i], 0, 0), DATA_PART_MASK)[DATA_PART_MASK];
                     // cv::Mat mask2 = dataLoader.get(Sample(chosenImages[i], 0, 0))[DATA_PART_MASK];
                     // cv::hconcat(mask, mask2, mask);
                     // cv::resize(mask, mask, mask.size() / 2);
@@ -802,9 +839,9 @@ namespace ark {
             if(verbose) {
                 std::cerr << "Preprocessing done, sparsely verifying data validity before training...\n";
             }
-            for (int i = 0; i < samples.size(); i += std::max<int>(samples.size() / 100, 1)) {
+            for (size_t i = 0; i < samples.size(); i += std::max<size_t>(samples.size() / 100, 1)) {
                 auto& sample = samples[i];
-                cv::Mat mask = dataLoader.get(sample)[DATA_PART_MASK];
+                cv::Mat mask = dataLoader.get(sample, DATA_PART_MASK)[DATA_PART_MASK];
                 if (mask.at<uint8_t>(sample.pix[1], sample.pix[0]) == 255) {
                     std::cerr << "FATAL: Invalid data detected during verification: background pixels were included in samples.\n";
                     std::exit(0);
@@ -816,8 +853,53 @@ namespace ark {
         }
 
         // Split samples {start ... end-1} by feature+thresh in-place and return the dividing index
-        // left (less) set willInit  be {start ... idx-1}, right (greater) set is {idx ... end-1}  
+        // left (less) set will be {start ... idx-1}, right (greater) set is {idx ... end-1}  
         size_t split(size_t start, size_t end, const Feature& feature, float thresh) {
+            size_t nextIndex = start;
+            // SampleVec temp;
+            // temp.reserve(end-start / 2);
+            // More concurrency (LOL)
+            std::vector<SampleVec> workerLefts(numThreads),
+                                   workerRights(numThreads);
+            auto worker = [&](int tid, size_t left, size_t right) {
+                auto& workerLeft = workerLefts[tid];
+                auto& workerRight = workerRights[tid];
+                workerLeft.reserve((right - left) / 2);
+                workerRight.reserve((right - left) / 2);
+                for (size_t i = left; i < right; ++i) {
+                    const Sample& sample = samples[i];
+                    if (scoreByFeature(dataLoader.get(sample, DATA_DEPTH)[DATA_DEPTH],
+                                sample.pix, feature.u, feature.v) < thresh) {
+                        workerLeft.push_back(samples[i]);
+                    } else {
+                        workerRight.push_back(samples[i]);
+                    }
+                }
+            };
+            size_t step = (end-start) / numThreads;
+            std::vector<std::thread> threadMgr;
+            for (int i = 0; i < numThreads - 1; ++i) {
+                threadMgr.emplace_back(worker, i,
+                        start + step * i, start + step * (i + 1));
+            }
+            threadMgr.emplace_back(worker, numThreads - 1, start + step * (numThreads-1), end);
+            for (int i = 0; i < numThreads; ++i) {
+                threadMgr[i].join();
+                std::copy(workerLefts[i].begin(), workerLefts[i].end(), samples.begin() + nextIndex);
+                nextIndex += workerLefts[i].size();
+            }
+            size_t splitIndex = nextIndex;
+            for (int i = 0; i < numThreads; ++i) {
+                std::copy(workerRights[i].begin(), workerRights[i].end(), samples.begin() + nextIndex);
+                nextIndex += workerRights[i].size();
+            }
+            if (nextIndex != end) {
+                std::cerr << "FATAL: Tree internal node splitting failed, "
+                    "next index mismatch " << nextIndex << " != " << end << ", something is fishy\n";
+                std::exit(0);
+            }
+            return splitIndex;
+            /*
             size_t nextIndex = start;
             for (size_t i = start; i < end; ++i) {
                 const Sample& sample = samples[i];
@@ -832,11 +914,11 @@ namespace ark {
             reorderByImage(samples, start, nextIndex);
             reorderByImage(samples, nextIndex, end);
             return nextIndex;
+            */
         }
 
         // Reorder samples in [start, ..., end-1] by image index to improve cache performance
         void reorderByImage(SampleVec& samples, size_t start, size_t end) {
-            size_t nextIndex = start;
             static auto sampleComp = [](const Sample & a, const Sample & b) {
                 // if (a.index == b.index) {
                 //     if (a.pix[1] == b.pix[1]) return a.pix[0] < b.pix[0];
@@ -887,13 +969,16 @@ namespace ark {
             return _data_paths[0].size();
         }
 
-        const std::array<cv::Mat, 2>& load(int idx) {
+        const std::array<cv::Mat, 2>& load(int idx, int hint = -1) {
             thread_local std::array<cv::Mat, 2> arr;
-            thread_local int last_idx = -1;
-            if (idx != last_idx) {
-                arr[0] = cv::imread(_data_paths[idx][0], IMREAD_FLAGS[0]);
-                arr[1] = cv::imread(_data_paths[idx][1], IMREAD_FLAGS[1]);
+            thread_local int last_idx = -1, last_hint = -1;
+            if (idx != last_idx || hint != last_hint) {
+                if (hint == 0 || hint == -1)
+                    arr[0] = cv::imread(_data_paths[idx][0], IMREAD_FLAGS[0]);
+                if (hint == 1 || hint == -1)
+                    arr[1] = cv::imread(_data_paths[idx][1], IMREAD_FLAGS[1]);
                 last_idx = idx;
+                last_hint = hint;
             }
             return arr;
         }
@@ -934,14 +1019,22 @@ namespace ark {
                          cv::Size& image_size,
                          int num_images,
                          const int* part_map)
-            : avaModel(ava_model), poseSequence(pose_seq), intrin(intrin), imageSize(image_size),
-              numImages(num_images), partMap(part_map) {
+            : numImages(num_images), imageSize(image_size),
+              avaModel(ava_model), poseSequence(pose_seq), intrin(intrin),
+              partMap(part_map) {
             seq.reserve(poseSequence.numFrames);
-            for (int i = 0; i < poseSequence.numFrames; ++i) {
-                seq.push_back(i);
+            const size_t INT32_MAXVAL = static_cast<size_t>(std::numeric_limits<int>::max());
+            if (poseSequence.numFrames > INT32_MAXVAL) {
+                std::cerr << "WARNING: Truncated pose sequence of length " <<
+                    poseSequence.numFrames << " > 2^31-1 to int32 range, to prevent overflow. "
+                    "May need to switch sequence type from int "
+                    "to int64_t in RTree.cpp AvatarDataSource (didn't do this since wastes memory)\n";
             }
-            for (int i = 0; i < poseSequence.numFrames; ++i) {
-                int r = random_util::randint<size_t>(i, poseSequence.numFrames - 1);
+            for (size_t i = 0; i < std::min(INT32_MAXVAL, poseSequence.numFrames); ++i) {
+                seq.push_back(static_cast<int>(i));
+            }
+            for (size_t i = 0; i < std::min(INT32_MAXVAL, poseSequence.numFrames); ++i) {
+                size_t r = random_util::randint<size_t>(i, poseSequence.numFrames - 1);
                 if (r != i) std::swap(seq[r], seq[i]);
             }
         }
@@ -950,12 +1043,13 @@ namespace ark {
             return numImages;
         }
 
-        const std::array<cv::Mat, 2>& load(int idx) {
+        const std::array<cv::Mat, 2>& load(int idx, int hint = -1) {
             thread_local std::array<cv::Mat, 2> arr;
-            thread_local int last_idx = -1;
+            thread_local int last_idx = -1, last_hint = -1;
             thread_local Avatar ava(avaModel);
-            if (idx != last_idx) {
+            if (idx != last_idx || hint != last_hint) {
                 last_idx = idx;
+                last_hint = hint;
                 if (poseSequence.numFrames) {
                     // random_util::randint<size_t>(0, poseSequence.numFrames - 1)
                     int seqid = seq[idx % poseSequence.numFrames];
@@ -967,8 +1061,11 @@ namespace ark {
                 }
                 ava.update();
                 AvatarRenderer renderer(ava, intrin);
-                arr[0] = renderer.renderDepth(imageSize),
-                arr[1] = renderer.renderPartMask(imageSize, partMap);
+
+                if (hint == 0 || hint == -1)
+                    arr[0] = renderer.renderDepth(imageSize);
+                if (hint == 1 || hint == -1)
+                    arr[1] = renderer.renderPartMask(imageSize, partMap);
             }
             return arr;
         }
@@ -995,7 +1092,7 @@ namespace ark {
             util::read_bin(is, sz);
             seq.reserve(sz);
             int x;
-            for (int i = 0; i < sz; ++i) {
+            for (size_t i = 0; i < sz; ++i) {
                 util::read_bin(is, x);
                 seq.push_back(x);
             }
@@ -1140,10 +1237,10 @@ namespace ark {
                ) {
         nodes.reserve(1 << std::min(max_tree_depth, 22));
         FileDataSource dataSource(depth_dir, part_mask_dir);
-        Trainer<FileDataSource> trainer(nodes, leafData, dataSource, numParts, max_images_loaded);
+        Trainer<FileDataSource> trainer(nodes, leafData, dataSource, numParts, static_cast<size_t>(max_images_loaded));
         bool shouldReadSamples = !samples_file.empty() && !generate_samples_file_only;
         if (shouldReadSamples) {
-            trainer.readSamples(samples_file, verbose);
+            trainer.readSamples(samples_file, verbose, num_images);
         }
         trainer.train(num_images, num_points_per_image, num_features,
                 max_probe_offset, min_samples, max_tree_depth, samples_per_feature, threshes_per_feature,
@@ -1174,10 +1271,10 @@ namespace ark {
                ) {
         nodes.reserve(1 << std::min(max_tree_depth, 22));
         AvatarDataSource dataSource(avatar_model, pose_seq, intrin, image_size, num_images, part_map);
-        Trainer<AvatarDataSource> trainer(nodes, leafData, dataSource, numParts, max_images_loaded);
+        Trainer<AvatarDataSource> trainer(nodes, leafData, dataSource, numParts, static_cast<size_t>(max_images_loaded));
         bool shouldReadSamples = !samples_file.empty() && !generate_samples_file_only;
         if (shouldReadSamples) {
-            trainer.readSamples(samples_file, verbose);
+            trainer.readSamples(samples_file, verbose, num_images);
         }
         trainer.train(num_images, num_points_per_image, num_features,
                 max_probe_offset, min_samples, max_tree_depth, samples_per_feature,
