@@ -796,7 +796,7 @@ namespace ark {
                 while (true) {
                     i = imageIndex++;
                     if (i >= chosenImages.size()) break;
-                    if (verbose && i % 20 == 19) {
+                    if (verbose && i % 1000 == 999) {
                         std::cerr << "Preprocessing data: " << i+1 << " of " << num_images << "\n";
                     }
                     cv::Mat mask = dataLoader.get(Sample(chosenImages[i], 0, 0), DATA_PART_MASK)[DATA_PART_MASK];
