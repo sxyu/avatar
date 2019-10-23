@@ -112,6 +112,7 @@ set(
 set(
   SOURCES
   Avatar.cpp 
+  BGSubtractor.cpp 
   RTree.cpp 
   AvatarOptimizer.cpp
   Calibration.cpp 
@@ -126,6 +127,7 @@ set(
   ${INCLUDE_DIR}/AvatarPCL.h
   ${INCLUDE_DIR}/AvatarRenderer.h
   ${INCLUDE_DIR}/AvatarOptimizer.h
+  ${INCLUDE_DIR}/BGSubtractor.h
   ${INCLUDE_DIR}/Calibration.h
   ${INCLUDE_DIR}/Config.h
   ${INCLUDE_DIR}/GaussianMixture.h
@@ -163,6 +165,11 @@ add_executable( scratch scratch.cpp )
 target_include_directories( scratch PRIVATE ${INCLUDE_DIR} )
 target_link_libraries( scratch ${DEPENDENCIES} ${LIB_NAME} )
 set_target_properties( scratch PROPERTIES COMPILE_FLAGS ${TARGET_COMPILE_FLAGS} )
+
+add_executable( bgsubtract bgsubtract.cpp )
+target_include_directories( bgsubtract PRIVATE ${INCLUDE_DIR} )
+target_link_libraries( bgsubtract ${DEPENDENCIES} ${LIB_NAME} )
+set_target_properties( bgsubtract PROPERTIES COMPILE_FLAGS ${TARGET_COMPILE_FLAGS} )
 
 add_executable( smpltrim smpltrim.cpp )
 target_include_directories( smpltrim PRIVATE ${INCLUDE_DIR} )
