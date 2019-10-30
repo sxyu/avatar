@@ -1248,7 +1248,7 @@ namespace ark {
                 threads.clear();
                 // Done counting
 
-                std::cout << "Finding optimal features..\n";
+                std::cout << "Finding optimal features..\n" << std::flush;
                 /** STEP 3 finding optimal feature */
                 std::vector<uint8_t> isLeaf(numNodes);
                 {
@@ -1344,7 +1344,7 @@ namespace ark {
                     threads.clear();
                 }
 
-                std::cout << "Creating new nodes and leaves\n";
+                std::cout << "Creating new nodes and leaves\n" << std::flush;
                 /** STEP 3 making leaves and children */
                 int oldStartNode = currStartNode;
                 currStartNode = static_cast<int>(nodes.size());
@@ -1388,7 +1388,7 @@ namespace ark {
                 int newNumNodes = static_cast<int>(nodes.size()) - currStartNode;
                 sparse.clear();
                 sparse.resize(newNumNodes);
-                std::cout << "Splitting interval for next tree level...\n";
+                std::cout << "Splitting interval for next tree level...\n" << std::flush;
 
                 /** STEP 3 splitting nodes and preparing for next level */
                 // Split non-leaf nodes and add leaves
