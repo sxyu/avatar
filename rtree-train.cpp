@@ -11,7 +11,7 @@ constexpr char WIND_NAME[] = "Image";
 
 int main(int argc, char** argv) {
     std::string data_path, output_path, intrin_path, resume_file;
-    bool verbose, preload, generate_samples_only;
+    bool verbose, preload;
     int num_threads, num_images, num_points_per_image, num_features, num_features_filtered, max_probe_offset, min_samples, max_tree_depth,
         min_samples_per_feature, threshes_per_feature, cache_size;
     float frac_samples_per_feature;
@@ -48,7 +48,6 @@ int main(int argc, char** argv) {
         ("height", po::value<int>(&size.height)->default_value(720), "Height of generated imaes; only useful if using synthetic data input")
         ("cache_size,c", po::value<int>(&cache_size)->default_value(50), "Max number of images in cache during training")
         ("resume,s", po::value<std::string>(&resume_file)->default_value(""), "Training save state file (previously known as 'samples' file, now more general).")
-        ("gen_samples,g", po::bool_switch(&generate_samples_only), "If specified, skips training and only generates samples file (must specify -s=PATH)")
     ;
 
     descPositional.add_options()
