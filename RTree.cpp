@@ -974,14 +974,22 @@ namespace ark {
                    int threshes_per_feature, int num_threads,
                    const std::string& save_path,
                    bool verbose) {
-            if (!save_path.empty()) readSamples(save_path);
+            if (!save_path.empty()) readSamples(save_path, verbose, num_images);
             if (needInitTraining) {
+                std::cerr << "Init RTree training (v2) with maximum depth " << max_tree_depth << "\n";
+
                 // Initialize new samples
                 initTraining(num_images, num_points_per_image, max_tree_depth, num_threads, verbose);
-                if (!save_path.empty()) writeSamples(save_path);
+                needInitTraining = false;
+                std::cerr << "Init complete\n";
+                if (!save_path.empty()) {
+                    std::cerr << "Saving to " << save_path << "\n";
+                    writeSamples(save_path);
+                }
+            } else {
+                std::cerr << "Resuming RTree training at depth " << depth << " of " << max_tree_depth << "\n";
             }
 
-            std::cerr << "Init RTree training (v2) with maximum depth " << max_tree_depth << "\n";
 
             // Train
 
@@ -991,7 +999,6 @@ namespace ark {
             Eigen::Tensor<float, 4> featureThreshCount;
             /* Num samples for node, feature, part */
             Eigen::MatrixXf nodeCount;
-            assignedNode.setZero(); // Assign all to root
 
             /* Keeps track of currently running threads */
             std::vector<std::thread> threads;
@@ -1002,8 +1009,8 @@ namespace ark {
             size_t partCountDisplay = 0;
             auto partWorker = [&](size_t left, size_t right){
                 for (size_t i = left; i < right; ++i) {
-                    if (i - left % 2000 == 1999) {
-                        partCountDisplay += 2000;
+                    if ((i - left) % 100000 == 99999) {
+                        partCountDisplay += 100000;
                         std::cout << partCountDisplay << " of " << samples.size() << " sample part labels computed\n";
                     }
                     const auto& dataArr = dataLoader.get(samples[i], DATA_PART_MASK);
@@ -1190,11 +1197,11 @@ namespace ark {
                     threadFeatureThreshCount.setZero();
                     threadNodeCount.setZero();
                     for (size_t sampid = samp_left; sampid < samp_right; ++sampid) {
-                        if ((sampid - samp_left) % 20000 == 0 && sampid > samp_left) {
+                        if ((sampid - samp_left) % 200000 == 0 && sampid > samp_left) {
 
-                            sampCount += 20000;
+                            sampCount += 200000;
                             std::cout << "Approximately " << sampCount << " of " << samples.size() << " samples processed\n";
-                            if (sampCount % 500000 == 0) std::cout << std::flush;
+                            if (sampCount % 5000000 == 0) std::cout << std::flush;
                         }
                         Sample& sample = samples[sampid];
                         int nodeid = assignedNode[sampid];
@@ -1485,6 +1492,11 @@ namespace ark {
                     }
                 }
             }
+            needInitTraining = true;
+            if (!save_path.empty()) {
+                std::cout << "[Almost done] Saving to " << save_path << "\n";
+                writeSamples(save_path);
+            }
 
             std::cout << "Training finished :)\n" << std::flush;
         }
@@ -1583,6 +1595,7 @@ namespace ark {
 
             size_t spsz;
             util::read_bin(ifs, spsz);
+
             sparse.resize(spsz);
             for (auto& spc : sparse) {
                 size_t subsz;
@@ -1819,6 +1832,7 @@ namespace ark {
             nodes.resize(1);
             /** Start with everything as samples for root node */
             assignedNode.resize(samples.size());
+            assignedNode.setZero(); // Assign all to root
             sparse.resize(1);
             sparse[0].resize(samples.size());
             std::iota(sparse[0].begin(), sparse[0].end(), size_t(0));
