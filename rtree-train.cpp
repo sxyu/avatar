@@ -9,11 +9,12 @@ namespace {
 constexpr char WIND_NAME[] = "Image";
 }
 
-int main(int argc, char** argv) { 
-    std::string data_path, output_path, intrin_path, samples_file;
+int main(int argc, char** argv) {
+    std::string data_path, output_path, intrin_path, resume_file;
     bool verbose, preload, generate_samples_only;
-    int num_threads, num_images, num_points_per_image, num_features, max_probe_offset, min_samples, max_tree_depth,
-        samples_per_feature, threshes_per_feature, cache_size;
+    int num_threads, num_images, num_points_per_image, num_features, num_features_filtered, max_probe_offset, min_samples, max_tree_depth,
+        min_samples_per_feature, threshes_per_feature, cache_size;
+    float frac_samples_per_feature;
     cv::Size size;
 
     namespace po = boost::program_options;
@@ -28,24 +29,25 @@ int main(int argc, char** argv) {
         ("verbose,v", po::bool_switch(&verbose), "Enable verbose output")
         ("preload", po::bool_switch(&preload), "Preload avatar pose sequence in memory to speed up random pose; "
                                                "may take multiple GBs of RAM, only useful if using synthetic data input")
-        ("images,i", po::value<int>(&num_images)->default_value(1000), "Number of random images to train on; Kinect used 1 million")
+        ("images,i", po::value<int>(&num_images)->default_value(100), "Number of random images to train on; Kinect used 1 million")
         ("intrin_path", po::value<std::string>(&intrin_path)->default_value(""), "Path to camera intrinsics file (default: uses hardcoded K4A intrinsics)")
         ("pixels,p", po::value<int>(&num_points_per_image)->default_value(2000), "Number of random pixels from each image; Kinect used 2000")
-        ("features,f", po::value<int>(&num_features)->default_value(2000), "Number of random features to try per tree node; Kinect used 2000")
+        ("features,f", po::value<int>(&num_features)->default_value(5000), "Number of random features to try per tree node on sparse samples; Kinect used 2000")
+        ("features_filtered,F", po::value<int>(&num_features_filtered)->default_value(200), "Number of random features to try per tree node on dense samples")
         ("probe,b", po::value<int>(&max_probe_offset)->default_value(170), "Maximum probe offset for random feature generation. "
                             "Noted in Kinect paper that cost 'levels off around >=129' but hyperparameter value not provided")
         ("min_samples,m", po::value<int>(&min_samples)->default_value(1), "Minimum number of samples of a child to declare current node a leaf")
-        ("samples_per_feature", po::value<int>(&samples_per_feature)->default_value(150),
-          "Maximum number of samples to use in each node training step to quickly propose thresholds. (Different from Kinect; name is terrible, "
-          "should really be something like 'subsamples per node')")
-        ("threshes_per_feature", po::value<int>(&threshes_per_feature)->default_value(30),
-          "Maximum number of candidates thresholds to optimize over for each feature (different from kinect)")
+        ("min_samples_per_feature", po::value<int>(&min_samples_per_feature)->default_value(20),
+          "Minimum number of sparse samples to use in each node training step to quickly propose thresholds. If num_samples * frac_samples_per_feature < min_samples_per_feature then min_samples_per_feature samples are used.")
+        ("frac_samples_per_feature", po::value<float>(&frac_samples_per_feature)->default_value(0.001f),
+          "Proportion of samples to use in each node training step to sparsely propose thresholds.")
+        ("threshes_per_feature", po::value<int>(&threshes_per_feature)->default_value(15),
+          "Maximum number of candidates thresholds to optimize over for each feature (different from Kinect)")
         ("depth,d", po::value<int>(&max_tree_depth)->default_value(20), "Maximum tree depth; Kinect used 20")
         ("width", po::value<int>(&size.width)->default_value(1280), "Width of generated images; only useful if using synthetic data input")
         ("height", po::value<int>(&size.height)->default_value(720), "Height of generated imaes; only useful if using synthetic data input")
-        ("cache_size,c", po::value<int>(&cache_size)->default_value(3000), "Max number of images in cache during training")
-        ("samples_file,s", po::value<std::string>(&samples_file)->default_value(""), "Pre-computed samples file to use for training, "
-                             "or if -g is specified, to write to. This speeds up the initial training process.")
+        ("cache_size,c", po::value<int>(&cache_size)->default_value(50), "Max number of images in cache during training")
+        ("resume,s", po::value<std::string>(&resume_file)->default_value(""), "Training save state file (previously known as 'samples' file, now more general).")
         ("gen_samples,g", po::bool_switch(&generate_samples_only), "If specified, skips training and only generates samples file (must specify -s=PATH)")
     ;
 
@@ -61,9 +63,9 @@ int main(int argc, char** argv) {
     posopt.add("data", 1);
 
     try {
-        po::store(po::command_line_parser(argc, argv).options(descCombined) 
-                .positional(posopt).run(), 
-                vm); 
+        po::store(po::command_line_parser(argc, argv).options(descCombined)
+                .positional(posopt).run(),
+                vm);
     } catch (std::exception& e) {
         std::cerr << "Error: " << e.what() << "\n";
         std::cerr << descPositional << "\n" << desc << "\n";
@@ -113,11 +115,12 @@ int main(int argc, char** argv) {
             intrin.cy = 366.992;
         }
         rtree.trainFromAvatar(model, poseSequence, intrin, size, num_threads, verbose, num_images, num_points_per_image,
-                num_features, max_probe_offset, min_samples, max_tree_depth, samples_per_feature, threshes_per_feature, ark::part_map::SMPL_JOINT_TO_PART_MAP, cache_size,
-                samples_file, generate_samples_only);
+                num_features, num_features_filtered, max_probe_offset, min_samples, max_tree_depth, min_samples_per_feature, frac_samples_per_feature,
+                threshes_per_feature, ark::part_map::SMPL_JOINT_TO_PART_MAP, cache_size, resume_file);
     } else {
         rtree.train(data_path + "/depth_exr", data_path + "/part_mask", num_threads, verbose, num_images, num_points_per_image,
-                num_features, max_probe_offset, min_samples, max_tree_depth, samples_per_feature, threshes_per_feature, cache_size, samples_file, generate_samples_only);
+                num_features, num_features_filtered, max_probe_offset, min_samples, max_tree_depth, min_samples_per_feature, frac_samples_per_feature, threshes_per_feature,
+                cache_size, resume_file);
     }
     rtree.exportFile(output_path);
 

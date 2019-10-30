@@ -70,15 +70,16 @@ namespace ark {
                    bool verbose = false,
                    int num_images = 30000,
                    int num_points_per_image = 2000,
-                   int num_features = 2000,
+                   int num_features = 5000,
+                   int num_features_filtered = 200,
                    int max_probe_offset = 225, 
                    int min_samples = 100,      // term crit
                    int max_tree_depth = 20,    // term crit 
-                   int samples_per_feature = 150,
-                   int threshes_per_feature = 30,
-                   int max_images_loaded = 2000,
-                   const std::string& samples_file = "",
-                   bool generate_samples_file_only = false
+                   int min_samples_per_feature = 20,
+                   float frac_samples_per_feature = 0.01f,
+                   int threshes_per_feature = 15,
+                   int max_images_loaded = 50,
+                   const std::string& train_partial_save_path = ""
                    );
 
         /** Train directly from avatar by rendering simulated images,
@@ -93,17 +94,18 @@ namespace ark {
                    int num_threads = std::thread::hardware_concurrency(),
                    bool verbose = false,
                    int num_images = 30000,
-                   int num_points_per_image = 2000,
+                   int num_points_per_image = 5000,
                    int num_features = 2000,
+                   int num_features_filtered = 200,
                    int max_probe_offset = 225, 
                    int min_samples = 100,      // term crit
                    int max_tree_depth = 20,     // term crit 
-                   int samples_per_feature = 150,
-                   int threshes_per_feature = 30,
+                   int min_samples_per_feature = 20,
+                   float frac_samples_per_feature = 0.01f,
+                   int threshes_per_feature = 15,
                    const int* part_map = nullptr, // part map
-                   int max_images_loaded = 2000,
-                   const std::string& samples_file = "",
-                   bool generate_samples_file_only = false
+                   int max_images_loaded = 50,
+                   const std::string& train_partial_save_path = ""
                    );
 
         std::vector<RNode> nodes;

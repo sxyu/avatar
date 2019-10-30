@@ -12,6 +12,7 @@
 #include <opencv2/imgcodecs.hpp>
 #include <boost/filesystem.hpp>
 #include <Eigen/StdVector>
+#include <unsupported/Eigen/CXX11/Tensor>
 
 #include "Util.h"
 #include "AvatarRenderer.h"
@@ -57,7 +58,7 @@ namespace {
             vti[0] = static_cast<int16_t>(std::round(v.x() / sampleDepth));
             vti[1] = static_cast<int16_t>(std::round(v.y() / sampleDepth));
             uti += pix; vti += pix;
-            
+
             return (getDepth(depth_image, uti) - getDepth(depth_image, vti));
         }
 }
@@ -84,9 +85,9 @@ namespace ark {
         // Image index
         int index;
         // Pixel position
-        RTree::Vec2i pix; 
+        RTree::Vec2i pix;
         EIGEN_MAKE_ALIGNED_OPERATOR_NEW
-    }; 
+    };
     using SampleVec = std::vector<Sample, Eigen::aligned_allocator<Sample> >;
 
     template<class DataSource>
@@ -122,7 +123,7 @@ namespace ark {
                 std::cout << "INFO: Number of images too large (" << images.size() <<
                     " > " << maxImagesLoaded << "), not preloading\n";
                 return false;
-            } 
+            }
 
             if (loadSize > maxImagesLoaded) {
                 clear();
@@ -221,7 +222,7 @@ namespace ark {
             }
 
             if (skip_train) return;
-            
+
             if (verbose) {
                 std::cerr << "Init RTree training with maximum depth " << max_tree_depth << "\n";
             }
@@ -328,14 +329,14 @@ namespace ark {
                     }
                     leafData.back() /= leafData.back().sum();
                     return;
-                } 
+                }
                 if (verbose) {
                     std::cout << "Training internal node, remaining depth: " << depth <<
                         ". Current data interval: " << start << " to " << end << "\n" << std::flush;
                 }
 
                 BEGIN_PROFILE;
-                using FeatureVec = std::vector<Feature, Eigen::aligned_allocator<Feature> >; 
+                using FeatureVec = std::vector<Feature, Eigen::aligned_allocator<Feature> >;
                 FeatureVec candidateFeatures;
                 candidateFeatures.resize(numFeatures);
 
@@ -485,7 +486,7 @@ namespace ark {
                     }
                     sampleFeatureScores.resize(0, 0);
                     sampleParts.resize(0);
-                    { 
+                    {
                         SampleVec _;
                         subsamples.swap(_);
                     }
@@ -499,7 +500,7 @@ namespace ark {
                     PROFILE(preload);
 
                     // CONCURRENT OP 3:
-                    std::vector<Eigen::MatrixXi, Eigen::aligned_allocator<Eigen::MatrixXi> > featureThreshDist(numFeatures); 
+                    std::vector<Eigen::MatrixXi, Eigen::aligned_allocator<Eigen::MatrixXi> > featureThreshDist(numFeatures);
                     for (int i = 0; i < numFeatures; ++i) {
                         featureThreshDist[i].resize(featureThreshes[i].size(), numParts * 2);
                         featureThreshDist[i].setZero();
@@ -510,7 +511,7 @@ namespace ark {
                     size_t sampleCount = 0;
                     // Compute part distributions for each feature/threshold pair
                     auto featureDistributionWorker = [&](size_t left, size_t right) {
-                        std::vector<Eigen::MatrixXi, Eigen::aligned_allocator<Eigen::MatrixXi> > threadFeatureDist(numFeatures); 
+                        std::vector<Eigen::MatrixXi, Eigen::aligned_allocator<Eigen::MatrixXi> > threadFeatureDist(numFeatures);
                         for (int i = 0; i < numFeatures; ++i) {
                             threadFeatureDist[i].resize(featureThreshes[i].size(), numParts * 2);
                             threadFeatureDist[i].setZero();
@@ -524,7 +525,7 @@ namespace ark {
                             // sampleId = sampleCount++;
                             // if (sampleId >= end) break;
                             if (verbose && end-start > 5000 &&
-                                    sampleId > left && 
+                                    sampleId > left &&
                                     (sampleId - left) % 10000 == 0) {
                                 sampleCount += 10000; // This is not really safe but for displaying only anyway
                                 std::cout << " Approx samples evaluated: " << sampleCount << " of " << end-start << "\n";
@@ -533,9 +534,9 @@ namespace ark {
                             auto& sample = samples[sampleId];
                             const auto& dataArr = dataLoader.get(sample);
 
-                            if (dataArr[DATA_PART_MASK].rows <= sample.pix[1] 
+                            if (dataArr[DATA_PART_MASK].rows <= sample.pix[1]
                                     || dataArr[DATA_PART_MASK].cols <= sample.pix[0]
-                                    || dataArr[DATA_DEPTH].rows <= sample.pix[1] 
+                                    || dataArr[DATA_DEPTH].rows <= sample.pix[1]
                                     || dataArr[DATA_DEPTH].cols <= sample.pix[0]) {
                                 std::cerr << "FISHY\n";
                                 std::exit(1);
@@ -629,7 +630,7 @@ namespace ark {
                                 threadBestInfoGain = featureBestInfoGain;
                                 threadBestFeature = feature;
                                 threadBestThresh = featureBestThresh;
-                            } 
+                            }
                         }
                         {
                             std::lock_guard<std::mutex> lock(trainMutex);
@@ -671,7 +672,7 @@ namespace ark {
                 std::cerr << bestThreadId << " thead\n\n";
 
                 for (int i = start; i < end; ++i) {
-                    std::cerr << " " << 
+                    std::cerr << " " <<
                         scoreByFeature(
                                 data[DATA_DEPTH][samples[i].index],
                                 samples[i].pix,
@@ -706,7 +707,8 @@ namespace ark {
             }
         }
 
-        // Compute information gain (mutual information scaled and shifted) by choosing optimal threshold
+        // Compute information gain (expected decrease in entropy; also corresponds to mutual information of parameter/part distribution)
+        // by choosing optimal threshold
         // output into optimal_thresh.col(feature_id)
         // best <= threshesPerSample thresholds are found and returned in arbitrary order
         // if place_best_thresh_first then puts the absolute best threshold first, rest still arbitrary order
@@ -835,7 +837,7 @@ namespace ark {
                     threads[i].join();
                 }
             }
-  
+
             if(verbose) {
                 std::cerr << "Preprocessing done, sparsely verifying data validity before training...\n";
             }
@@ -853,7 +855,7 @@ namespace ark {
         }
 
         // Split samples {start ... end-1} by feature+thresh in-place and return the dividing index
-        // left (less) set will be {start ... idx-1}, right (greater) set is {idx ... end-1}  
+        // left (less) set will be {start ... idx-1}, right (greater) set is {idx ... end-1}
         size_t split(size_t start, size_t end, const Feature& feature, float thresh) {
             size_t nextIndex = start;
             // SampleVec temp;
@@ -934,8 +936,924 @@ namespace ark {
         const int numParts;
         DataLoader<DataSource> dataLoader;
 
-        bool verbose;
         int numImages, numFeatures, maxProbeOffset, minSamples, numThreads, samplesPerFeature, threshesPerFeature;
+        bool verbose;
+
+        // const int SAMPLES_PER_FEATURE = 60;
+        std::vector<int> chosenImages;
+        SampleVec samples;
+    };
+
+    template<class DataSource>
+    class TrainerV2 {
+    public:
+        struct Feature {
+            RTree::Vec2 u, v;
+            std::vector<float> threshes;
+            EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+        };
+
+        TrainerV2() =delete;
+        TrainerV2(const TrainerV2&) =delete;
+        TrainerV2(TrainerV2&&) =delete;
+
+        TrainerV2(std::vector<RTree::RNode>& nodes,
+                std::vector<RTree::Distribution>& leaf_data,
+                DataSource& data_source,
+                int num_parts,
+                size_t max_images_loaded)
+            : nodes(nodes), leafData(leaf_data), numParts(num_parts),
+              dataLoader(data_source, max_images_loaded), needInitTraining(true) {
+        }
+
+        void train(int num_images, int num_points_per_image, int num_features,
+                   int num_features_filtered,
+                   int max_probe_offset, int min_samples, int max_tree_depth,
+                   int min_samples_per_feature,
+                   float frac_samples_per_feature,
+                   int threshes_per_feature, int num_threads,
+                   const std::string& save_path,
+                   bool verbose) {
+            if (!save_path.empty()) readSamples(save_path);
+            if (needInitTraining) {
+                // Initialize new samples
+                initTraining(num_images, num_points_per_image, max_tree_depth, num_threads, verbose);
+                if (!save_path.empty()) writeSamples(save_path);
+            }
+
+            std::cerr << "Init RTree training (v2) with maximum depth " << max_tree_depth << "\n";
+
+            // Train
+
+            /* Current features for each node */
+            std::vector<std::vector<Feature, Eigen::aligned_allocator<Feature> > > feats;
+            /* Num samples for node, feature, (greater than) thresh, part */
+            Eigen::Tensor<float, 4> featureThreshCount;
+            /* Num samples for node, feature, part */
+            Eigen::MatrixXf nodeCount;
+            assignedNode.setZero(); // Assign all to root
+
+            /* Keeps track of currently running threads */
+            std::vector<std::thread> threads;
+            /** Precomputed vector of part indices (correct label)
+             *  for each sample */
+            std::cout << "Computing and caching part label of each sample...\n" << std::flush;
+            Eigen::Matrix<uint8_t, Eigen::Dynamic, 1> samplesParts(samples.size());
+            size_t partCountDisplay = 0;
+            auto partWorker = [&](size_t left, size_t right){
+                for (size_t i = left; i < right; ++i) {
+                    if (i - left % 2000 == 1999) {
+                        partCountDisplay += 2000;
+                        std::cout << partCountDisplay << " of " << samples.size() << " sample part labels computed\n";
+                    }
+                    const auto& dataArr = dataLoader.get(samples[i], DATA_PART_MASK);
+                    samplesParts(i) = dataArr[DATA_PART_MASK]
+                        .template at<uint8_t>(samples[i].pix[1], samples[i].pix[0]);
+                }
+            };
+            size_t step = samples.size() / num_threads;
+            for (int i = 0; i < num_threads-1; ++i) {
+                threads.emplace_back(partWorker, step * i, step * (i + 1));
+            }
+            threads.emplace_back(partWorker, step * (num_threads-1), samples.size());
+            for (int i = 0; i < num_threads; ++i) {
+                threads[i].join();
+            }
+            threads.clear();
+
+            /* Main loop, exactly once per tree level */
+            for (; depth <= max_tree_depth; ++depth) {
+                int numNodes = nodes.size() - currStartNode;
+                if (numNodes == 0) {
+                    std::cout << "Note: quitting early at depth " << depth << " because no nodes in next layer (maybe already separates data perfectly)\n";
+                    break;
+                }
+                std::cout << "\nRTree training (v2) at depth " << depth << ", " << numNodes << " node(s) remaining at this depth\n" << std::flush;
+
+                if (verbose) {
+                    std::cerr << "Requires allocating about " << numNodes * num_features_filtered *
+                         (threshes_per_feature + 1) * numParts * (num_threads + 1) * 4 << " bytes\n";
+                }
+                if (sparse.size() != numNodes) {
+                    std::cerr << "FATAL: the size of the sparse samples vector " << sparse.size() << " is different from the number of nodes " << numNodes << "\n";
+                    std::exit(1);
+                }
+
+                /** STEP 0 Compute random reatures and sparse samples */
+                feats.resize(numNodes);
+                {
+                    static const double MIN_PROBE = 0.1;
+                    std::atomic<int> randomGenIndex(0);
+                    auto randomGenWorker = [&]() {
+                        int i;
+                        while (true) {
+                            i = randomGenIndex++;
+                            if (i >= numNodes) {
+                                break;
+                            }
+                            // Create random features
+                            feats[i].resize(num_features);
+                            for (auto& feature : feats[i]) {
+                                feature.u.x() =
+                                    random_util::uniform(-max_probe_offset + MIN_PROBE, max_probe_offset - MIN_PROBE);
+                                feature.u.x() += (feature.u.x() >= 0.0 ? MIN_PROBE : -MIN_PROBE);
+                                feature.u.y() = random_util::uniform(-max_probe_offset + MIN_PROBE, max_probe_offset - MIN_PROBE);
+                                feature.u.y() += (feature.u.y() >= 0.0 ? MIN_PROBE : -MIN_PROBE);
+                                feature.v.x() = random_util::uniform(-max_probe_offset + MIN_PROBE, max_probe_offset - MIN_PROBE);
+                                feature.v.x() += (feature.v.x() >= 0.0 ? MIN_PROBE : -MIN_PROBE);
+                                feature.v.y() = random_util::uniform(-max_probe_offset + MIN_PROBE, max_probe_offset - MIN_PROBE);
+                                feature.v.y() += (feature.v.y() >= 0.0 ? MIN_PROBE : -MIN_PROBE);
+                            }
+                            size_t numSparseSamples = std::max<size_t>(sparse[i].size() * frac_samples_per_feature, min_samples_per_feature);
+                            if (sparse[i].size() > numSparseSamples) {
+                                for (int j = 0; j < numSparseSamples; ++j) {
+                                    size_t r = random_util::randint<size_t>(j, sparse[i].size()-1);
+                                    if (r != j) std::swap(sparse[i][j], sparse[i][r]);
+                                }
+                                sparse[i].resize(numSparseSamples);
+                                sparse[i].shrink_to_fit();
+                            }
+                            sort(sparse[i].begin(), sparse[i].end());
+                        }
+                    };
+
+                    for (int i = 0; i < std::min(numNodes, num_threads); ++i) {
+                        threads.emplace_back(randomGenWorker);
+                    }
+                    for (int i = 0; i < static_cast<int>(threads.size()); ++i) {
+                        threads[i].join();
+                    }
+                    threads.clear();
+                }
+
+                if (!save_path.empty()) {
+                    std::cout << "Saving to " << save_path << "\n";
+                    writeSamples(save_path);
+                }
+
+                /* STEP 1 Choose features and threshes based on sparse samples */
+                std::cout << "Computing features on sparse samples...\n" << std::flush;
+                for (int nodeid = 0; nodeid < numNodes; ++nodeid) {
+                    if (nodeid % 100 == 99) {
+                        std::cout << nodeid + 1 << " of " << numNodes << " nodes processed\n";
+                        if (nodeid % 1000 == 999) std::cout << std::flush;
+                    }
+                    // Skip leaves
+                    if (~nodes[currStartNode + nodeid].leafid) continue;
+                    auto& subsamples = sparse[nodeid];
+                    Eigen::MatrixXd sampleFeatureScores(subsamples.size(), num_features);
+                    // This worker loads and computes the pixel scores and
+                    // parts for sparse features
+                    auto sparseFeatureWorker = [&](size_t left, size_t right) {
+                        for (size_t sampleId = left; sampleId < right; ++sampleId) {
+                            auto& sample = samples[subsamples[sampleId]];
+                            const auto& dataArr = dataLoader.get(sample, DATA_DEPTH);
+
+                            for (int featureId = 0; featureId < num_features; ++featureId) {
+                                auto& feature = feats[nodeid][featureId];
+                                sampleFeatureScores(sampleId, featureId) =
+                                    scoreByFeature(dataArr[DATA_DEPTH],
+                                            sample.pix, feature.u, feature.v);
+                            }
+                        }
+                    };
+
+                    if (subsamples.size() < 10) {
+                        // Better to not create threads
+                        sparseFeatureWorker(0, subsamples.size());
+                    } else {
+                        size_t step = subsamples.size() / num_threads;
+                        for (int i = 0; i < num_threads-1; ++i) {
+                            threads.emplace_back(sparseFeatureWorker, step * i, step * (i + 1));
+                        }
+                        threads.emplace_back(sparseFeatureWorker, step * (num_threads-1), subsamples.size());
+                        for (int i = 0; i < num_threads; ++i) {
+                            threads[i].join();
+                        }
+                        threads.clear();
+                    }
+
+                    // Find best information gain (expected entropy decrease)
+                    // This worker finds threshesPerSample optimal thresholds for each feature on the selected sparse features
+                    std::atomic<int> featuresLeft(feats[nodeid].size()  - 1);
+                    std::vector<std::pair<float, int> > rankedFeats;
+                    rankedFeats.reserve(num_features);
+                    auto threshWorker = [&](int thread_id) {
+                        std::vector<std::pair<float, int> > threadRankedFeats;
+                        threadRankedFeats.reserve(num_features / num_threads);
+                        int featureId;
+                        while (true) {
+                            featureId = featuresLeft--;
+                            if (featureId < 0) break;
+                            float infoGain = computeOptimalThreshes2(
+                                    subsamples, sampleFeatureScores, samplesParts,
+                                    featureId, feats[nodeid][featureId].threshes,
+                                    threshes_per_feature);
+                            threadRankedFeats.emplace_back(infoGain, featureId);
+                        }
+                        std::lock_guard<std::mutex> lock(trainMutex);
+                        std::move(threadRankedFeats.begin(), threadRankedFeats.end(), std::back_inserter(rankedFeats));
+                    };
+                    for (int i = 0; i < num_threads; ++i) {
+                        threads.emplace_back(threshWorker, i);
+                    }
+                    for (int i = 0; i < num_threads; ++i) {
+                        threads[i].join();
+                    }
+                    threads.clear();
+
+                    // Pick best features
+                    if (rankedFeats.size() > num_features_filtered) {
+                        std::nth_element(rankedFeats.begin(), rankedFeats.begin() + num_features_filtered,
+                                         rankedFeats.end(), std::greater<std::pair<float, int> >());
+                        for (int j = 0; j < num_features_filtered; ++j) {
+                            int featureId = rankedFeats[j].second;
+                            if (j != featureId) {
+                                std::swap(feats[nodeid][j], feats[nodeid][featureId]);
+                            }
+                        }
+                        feats[nodeid].resize(num_features_filtered);
+                    }
+                }
+
+                /* STEP 2 Concurrently count the number of samples exceeding each feature/thresh pair */
+                std::cout << "Counting total samples matching each (feature, thresh) pair...\n" << std::flush;
+                featureThreshCount.resize(numNodes, num_features_filtered, threshes_per_feature, numParts);
+                nodeCount.resize(numNodes, numParts);
+                featureThreshCount.setZero();
+                nodeCount.setZero();
+                size_t sampCount = 0;
+                auto countWorker = [&](size_t samp_left, size_t samp_right) {
+                    Eigen::Tensor<float, 4> threadFeatureThreshCount;
+                    Eigen::MatrixXf threadNodeCount(numNodes, numParts);
+                    threadFeatureThreshCount.resize(numNodes, num_features_filtered, threshes_per_feature, numParts);
+                    threadFeatureThreshCount.setZero();
+                    threadNodeCount.setZero();
+                    for (size_t sampid = samp_left; sampid < samp_right; ++sampid) {
+                        if ((sampid - samp_left) % 20000 == 0 && sampid > samp_left) {
+
+                            sampCount += 20000;
+                            std::cout << "Approximately " << sampCount << " of " << samples.size() << " samples processed\n";
+                            if (sampCount % 500000 == 0) std::cout << std::flush;
+                        }
+                        Sample& sample = samples[sampid];
+                        int nodeid = assignedNode[sampid];
+                        if (nodeid < 0) continue;
+                        auto& node = nodes[nodeid];
+                        std::vector<Feature, Eigen::aligned_allocator<Feature> > & nodeFeatures = feats[nodeid - currStartNode];
+                        if (num_features_filtered < static_cast<int>(nodeFeatures.size())) {
+                            std::cerr << "FATAL: more features generated than allowed " << nodeFeatures.size() << " > " << num_features_filtered <<", terminated\n";
+                            std::exit(1);
+                        }
+                        uint8_t partid = 0;
+                        for (int featid = 0; featid < static_cast<int>(nodeFeatures.size()); ++featid) {
+                            Feature& feature = nodeFeatures[featid];
+                            const auto& dataArr = dataLoader.get(sample, DATA_DEPTH);
+                            partid = samplesParts[sampid];
+                            if (partid >= numParts) {
+                                std::cerr << "FATAL: Invalid part id " << partid << " detected, possibly samples are corrupted\n";
+                                std::exit(1);
+                            }
+                            float score = scoreByFeature(dataArr[DATA_DEPTH],
+                                    sample.pix, feature.u, feature.v);
+
+                            if (threshes_per_feature < static_cast<int>(feature.threshes.size())) {
+                                std::cerr << "FATAL: more threshes generated than allowed for feature " << featid << ": " << feature.threshes.size() << " > " << threshes_per_feature <<", terminated\n";
+                                std::exit(1);
+                            }
+
+                            for(int threshid = 0; threshid < static_cast<int>(feature.threshes.size()); ++ threshid) {
+                                if (score < feature.threshes[threshid]) {
+                                    threadFeatureThreshCount(nodeid - currStartNode, featid, threshid, partid) += 1.0f;
+                                }
+                            }
+                        }
+                        threadNodeCount(nodeid - currStartNode, partid) += 1.0f;
+                    }
+
+                    {
+                        std::lock_guard<std::mutex> lock(trainMutex);
+                        featureThreshCount += threadFeatureThreshCount;
+                        nodeCount.noalias() += threadNodeCount;
+                    }
+                };
+                size_t step = samples.size() / num_threads;
+                for (int i = 0; i < num_threads - 1; ++i) {
+                    threads.emplace_back(countWorker, step * i, step * (i + 1));
+                }
+                threads.emplace_back(countWorker, step * (num_threads - 1), samples.size());
+                for (int i = 0; i < num_threads; ++i) {
+                    threads[i].join();
+                }
+                threads.clear();
+                // Done counting
+
+                std::cout << "Finding optimal features..\n";
+                /** STEP 3 finding optimal feature */
+                std::vector<uint8_t> isLeaf(numNodes);
+                {
+                    Eigen::VectorXf featureCountTotal = nodeCount.rowwise().sum();
+                    Eigen::array<float, 1> _dims({3});
+                    Eigen::Tensor<float, 3> featureThreshCountTotal = featureThreshCount.sum(_dims);
+                    // Compute optimal feature/thresh pairs from counts
+                    std::atomic<size_t> nodeOptIndex(currStartNode);
+                    auto nodeOptWorker = [&]() {
+                        int nodeid = 0;
+                        uint8_t threadIsLeaf;
+                        while (true) {
+                            threadIsLeaf = false;
+                            nodeid = nodeOptIndex++;
+                            if (nodeid >= static_cast<int>(nodes.size())) break;
+                            if (~nodes[nodeid].leafid) continue;
+                            float bestEntropy = FLT_MAX, bestThresh;
+                            Feature bestFeature;
+                            std::vector<Feature, Eigen::aligned_allocator<Feature> > & nodeFeatures = feats[nodeid - currStartNode];
+                            float total = featureCountTotal(nodeid - currStartNode);
+                            float bestPartTotal = -1.; // DEBUG
+                            for (int featid = 0; featid < static_cast<int>(nodeFeatures.size()); ++featid) {
+                                Feature& feature = nodeFeatures[featid];
+                                for(int threshid = 0; threshid < static_cast<int>(feature.threshes.size()); ++ threshid) {
+                                    float entropy = 0.f;
+                                    float partTotal = featureThreshCountTotal(nodeid - currStartNode, featid, threshid);
+                                    float otherPartTotal = total - partTotal;
+                                    float partFrac = partTotal / total, otherFrac = 1.f - partFrac;
+                                    for (int partid = 0; partid < numParts; ++partid) {
+                                        float p = featureThreshCount(nodeid - currStartNode, featid, threshid, partid) / partTotal;
+                                        float q = (nodeCount(nodeid - currStartNode, partid) -
+                                                   featureThreshCount(nodeid - currStartNode, featid, threshid, partid)) / otherPartTotal;
+                                        if (p > 1e-12) entropy -= p * log2(p) * partFrac;
+                                        if (q > 1e-12) entropy -= q * log2(q) * otherFrac;
+                                    }
+                                    if (entropy < bestEntropy) {
+                                        bestEntropy = entropy;
+                                        bestFeature = feature;
+                                        bestThresh = feature.threshes[threshid];
+                                        // Leaf detection
+                                        if (partTotal == 0.0 || otherPartTotal == 0.0) {
+                                            threadIsLeaf = 4; // self is leaf
+                                        } else if (entropy <= 1e-12f) {
+                                            threadIsLeaf = 3; // both children are leaves
+                                        } else {
+                                            threadIsLeaf = 0; // not leaf
+                                            if (partTotal <= 1.0) {
+                                                threadIsLeaf |= 1; // left child is leaf
+                                            }
+                                            if (otherPartTotal <= 1.0) {
+                                                threadIsLeaf |= 2; // right child is leaf
+                                            }
+                                        }
+                                        bestPartTotal = partTotal;
+                                    }
+                                }
+                            }
+                            if (depth >= max_tree_depth) {
+                                // Max depth reached, force this to be a leaf
+                                threadIsLeaf = 4;
+                            }
+                            // Only display for first one (else gets too messy
+                            if (verbose && nodeid == currStartNode) {
+                                std::cout<< "[First node in layer] Min expected entropy: " << bestEntropy << " thresh: " << bestThresh <<" u:" << bestFeature.u.transpose() << " v:" << bestFeature.v.transpose() << " split:" << bestPartTotal << "," << total - bestPartTotal << " detect leaf? ";
+
+                                switch(threadIsLeaf) {
+                                    case 0: std::cout << "NO"; break;
+                                    case 1: std::cout << "Left child"; break;
+                                    case 2: std::cout << "Right child"; break;
+                                    case 3: std::cout << "Both children"; break;
+                                    default: std::cout << "YES";
+                                }
+                                std::cout  << "\n";
+                            }
+                            // best feature/thresh will be the ones at index 0
+                            bestFeature.threshes.resize(1);
+                            nodeFeatures.resize(1);
+                            bestFeature.threshes[0] = bestThresh;
+                            nodeFeatures[0] = bestFeature;
+                            bestFeature.threshes.shrink_to_fit();
+                            nodeFeatures.shrink_to_fit();
+                            if (threadIsLeaf) {
+                                isLeaf[nodeid - currStartNode] = threadIsLeaf;
+                            }
+                        }
+                    };
+                    for (int i = 0; i < std::min(numNodes, num_threads); ++i) {
+                        threads.emplace_back(nodeOptWorker);
+                    }
+                    for (int i = 0; i < static_cast<int>(threads.size()); ++i) {
+                        threads[i].join();
+                    }
+                    threads.clear();
+                }
+
+                std::cout << "Creating new nodes and leaves\n";
+                /** STEP 3 making leaves and children */
+                int oldStartNode = currStartNode;
+                currStartNode = static_cast<int>(nodes.size());
+                {
+
+                    size_t oldNumLeaves = leafData.size();
+                    // Helper for making a node a leaf (creates leaf data)
+                    auto addLeaf = [&](RTree::RNode& node) {
+                        node.leafid = static_cast<int>(leafData.size());
+                        leafData.emplace_back();
+                        leafData.back().resize(numParts);
+                        leafData.back().setZero();
+                    };
+
+                    // Set threshes, make children nodes for all non-leaf nodes, and add leaf data for leaf nodes
+                    for (int nodeid = oldStartNode; nodeid < currStartNode; ++nodeid) {
+                        auto& node = nodes[nodeid];
+                        if (~node.leafid) continue;
+                        if (isLeaf[nodeid - oldStartNode] != 4) {
+                            node.u = feats[nodeid - oldStartNode][0].u;
+                            node.v = feats[nodeid - oldStartNode][0].v;
+                            node.thresh = feats[nodeid - oldStartNode][0].threshes[0];
+                            node.lnode = nodes.size();
+                            nodes.emplace_back();
+                            node.rnode = nodes.size();
+                            nodes.emplace_back();
+                            if (isLeaf[nodeid - oldStartNode] & uint8_t(1)) {
+                                addLeaf(nodes[node.lnode]);
+                            }
+                            if (isLeaf[nodeid - oldStartNode] & uint8_t(2)) {
+                                addLeaf(nodes[node.rnode]);
+                            }
+                        } else {
+                            addLeaf(node);
+                        }
+                    }
+                    if (verbose) {
+                        std::cout << "Added " << leafData.size() - oldNumLeaves << " leaf nodes, there are now " << leafData.size() << " leaves in the tree\n";
+                    }
+                }
+                int newNumNodes = static_cast<int>(nodes.size()) - currStartNode;
+                sparse.clear();
+                sparse.resize(newNumNodes);
+                std::cout << "Splitting interval for next tree level...\n";
+
+                /** STEP 3 splitting nodes and preparing for next level */
+                // Split non-leaf nodes and add leaves
+                auto splitWorker = [&](size_t samp_left, size_t samp_right) {
+                    for (size_t sampid = samp_left; sampid < samp_right; ++sampid) {
+                        Sample& sample = samples[sampid];
+                        int nodeid = assignedNode[sampid];
+                        if (nodeid < 0) continue;
+                        auto& node = nodes[nodeid];
+
+                        std::vector<Feature, Eigen::aligned_allocator<Feature> > & nodeFeatures = feats[nodeid - oldStartNode];
+                        Feature& feature = nodeFeatures[0];
+                        const auto& dataArr = dataLoader.get(sample, DATA_DEPTH);
+                        int8_t partid = samplesParts[sampid];
+                        auto nodeIsLeaf = isLeaf[nodeid - oldStartNode];
+                        if (nodeIsLeaf == 4) {
+                            // TODO: try to get rid of these locks, they are evil
+                            // Create leaf and make distribution
+                            assignedNode[sampid] = -1;
+                            std::lock_guard<std::mutex> lock(trainMutex);
+                            if (node.leafid < 0) {
+                                std::cerr << "WHAT\n";
+                                std::exit(1);
+                            }
+                            ++leafData[node.leafid][partid];
+                            continue;
+                        }
+                        if (~node.leafid) {
+                            std::cerr << "FATAL: Node should not be leaf!\n";
+                            std::exit(1);
+                        }
+                        if (nodeid < oldStartNode || nodeid >= currStartNode) {
+                            std::cerr << "FATAL: Node in wrong interval!\n";
+                            std::exit(1);
+                        }
+
+                        float score = scoreByFeature(dataArr[DATA_DEPTH],
+                                sample.pix, feature.u, feature.v);
+
+                        if (score < feature.threshes[0]) {
+                            std::lock_guard<std::mutex> lock(trainMutex);
+                            if (nodeIsLeaf & 1) {
+                                assignedNode[sampid] = -1;
+                                ++leafData[nodes[node.lnode].leafid][partid];
+                            } else {
+                                sparse[node.lnode - currStartNode].push_back(sampid);
+                                assignedNode[sampid] = node.lnode;
+                            }
+                        } else {
+                            std::lock_guard<std::mutex> lock(trainMutex);
+                            if (nodeIsLeaf & 2) {
+                                assignedNode[sampid] = -1;
+                                ++leafData[nodes[node.rnode].leafid][partid];
+                            } else {
+                                sparse[node.rnode - currStartNode].push_back(sampid);
+                                assignedNode[sampid] = node.rnode;
+                            }
+                        }
+                    }
+                };
+                step = samples.size() / num_threads;
+                for (int i = 0; i < num_threads - 1; ++i) {
+                    threads.emplace_back(splitWorker, step * i, step * (i + 1));
+                }
+                threads.emplace_back(splitWorker, step * (num_threads - 1), samples.size());
+                for (int i = 0; i < num_threads; ++i) {
+                    threads[i].join();
+                }
+                threads.clear();
+
+                // Normalize leaves
+                for (int nodeid = oldStartNode; nodeid < currStartNode; ++nodeid) {
+                    auto& node = nodes[nodeid];
+                    bool bad = false;
+                    if (isLeaf[nodeid - oldStartNode] == 4) {
+                        float sum = leafData[node.leafid].sum();
+                        if (sum <= 0.f) bad = true;
+                        leafData[node.leafid] /= sum;
+                    } else {
+                        if (isLeaf[nodeid - oldStartNode] & 1) {
+                            float sum = leafData[nodes[node.lnode].leafid].sum();
+                            if (sum <= 0.f) bad = true;
+                            leafData[nodes[node.lnode].leafid] /= sum;
+                        }
+                        if (isLeaf[nodeid - oldStartNode] & 2) {
+                            float sum = leafData[nodes[node.rnode].leafid].sum();
+                            if (sum <= 0.f) bad = true;
+                            leafData[nodes[node.rnode].leafid] /= sum;
+                        }
+                    }
+                    if (bad) {
+                        std::cerr << "FATAL: Empty node (sum 0) detected\n";
+                        std::exit(1);
+                    }
+                }
+            }
+
+            std::cout << "Training finished :)\n" << std::flush;
+        }
+
+        void writeSamples(const std::string & path) {
+            std::ofstream ofs(path, std::ios::out | std::ios::binary);
+            ofs.write("RTREE_V2 ", 9);
+            util::write_bin(ofs, numParts);
+            dataLoader.dataSource.serialize(ofs);
+            util::write_bin(ofs, needInitTraining);
+            util::write_bin(ofs, depth);
+            util::write_bin(ofs, currStartNode);
+
+            util::write_bin(ofs, sparse.size());
+            for (auto& spc : sparse) {
+                util::write_bin(ofs, spc.size());
+                for (auto& sz: spc) {
+                    util::write_bin(ofs, sz);
+                }
+            }
+
+            util::write_bin(ofs, size_t(assignedNode.rows()));
+            for (int i = 0; i < assignedNode.rows(); ++i) {
+                util::write_bin(ofs, int(assignedNode[i]));
+            }
+
+            util::write_bin(ofs, size_t(nodes.size()));
+            for (int i = 0; i < nodes.size(); ++i) {
+                util::write_bin(ofs, nodes[i].u[0]);
+                util::write_bin(ofs, nodes[i].u[1]);
+                util::write_bin(ofs, nodes[i].v[0]);
+                util::write_bin(ofs, nodes[i].v[1]);
+                util::write_bin(ofs, nodes[i].thresh);
+                util::write_bin(ofs, nodes[i].lnode);
+                util::write_bin(ofs, nodes[i].rnode);
+                util::write_bin(ofs, nodes[i].leafid);
+            }
+
+            util::write_bin(ofs, size_t(leafData.size()));
+            for (int i = 0; i < leafData.size(); ++i) {
+                for (int j = 0; j < numParts; ++j) {
+                    util::write_bin(ofs, leafData[i][j]);
+                }
+            }
+
+            reorderByImage(samples, 0, samples.size());
+            ofs.write("S\n", 2);
+            size_t last_idx = 0;
+            util::write_bin(ofs, samples.size());
+            for (size_t i = 0; i <= samples.size(); ++i) {
+                if (i == samples.size() ||
+                    samples[i].index != samples[last_idx].index) {
+                    util::write_bin(ofs, samples[last_idx].index);
+                    util::write_bin(ofs, int(i - last_idx));
+                    for (size_t j = last_idx; j < i; ++j) {
+                        util::write_bin(ofs, samples[j].pix[0]);
+                        util::write_bin(ofs, samples[j].pix[1]);
+                    }
+                    last_idx = i;
+                }
+            }
+            ofs.close();
+        }
+
+        void readSamples(const std::string & path, bool verbose = false, int max_num_images = -1) {
+            std::ifstream ifs(path, std::ios::in | std::ios::binary);
+            if (!ifs) {
+                if (verbose) {
+                    std::cerr << "Could not open " << path << ", assuming new file\n";
+                }
+                return;
+            }
+            if (verbose) {
+                std::cout << "Recovering data source from samples file\n";
+            }
+            char rtreev2marker[9];
+            ifs.read(rtreev2marker, 9);
+            if (strncmp(rtreev2marker, "RTREE_V2 ", 9)) {
+                std::cerr << "ERROR: Invalid or corrupted trainer V2 samples file at " << path << "\n";
+                return;
+            }
+            if (verbose) {
+                std::cout << "Reading samples from samples file\n";
+            }
+            int numPartsCheck;
+            util::read_bin(ifs, numPartsCheck);
+            if(numPartsCheck != numParts) {
+                std::cerr << "ERROR: Trainer V2 samples file at " << path << " has differerent number of parts " <<
+                    numParts << ", perhaps you changed the part map or model during training?\n";
+                return;
+            }
+            dataLoader.dataSource.deserialize(ifs);
+            util::read_bin(ifs, needInitTraining);
+            util::read_bin(ifs, depth);
+            util::read_bin(ifs, currStartNode);
+
+            size_t spsz;
+            util::read_bin(ifs, spsz);
+            sparse.resize(spsz);
+            for (auto& spc : sparse) {
+                size_t subsz;
+                util::read_bin(ifs, subsz);
+                spc.resize(subsz);
+                for (size_t& sz: spc) {
+                    util::read_bin(ifs, sz);
+                }
+            }
+
+            size_t assignNodeSz;
+            util::read_bin(ifs, assignNodeSz);
+            assignedNode.resize(assignNodeSz, 1);
+            for (int i = 0; i < assignedNode.rows(); ++i) {
+                util::read_bin(ifs, assignedNode[i]);
+            }
+
+            size_t nodesz;
+            util::read_bin(ifs, nodesz);
+            nodes.resize(nodesz);
+            for (int i = 0; i < nodes.size(); ++i) {
+                util::read_bin(ifs, nodes[i].u[0]);
+                util::read_bin(ifs, nodes[i].u[1]);
+                util::read_bin(ifs, nodes[i].v[0]);
+                util::read_bin(ifs, nodes[i].v[1]);
+                util::read_bin(ifs, nodes[i].thresh);
+                util::read_bin(ifs, nodes[i].lnode);
+                util::read_bin(ifs, nodes[i].rnode);
+                util::read_bin(ifs, nodes[i].leafid);
+            }
+
+            size_t leafsz;
+            util::read_bin(ifs, leafsz);
+            leafData.resize(leafsz);
+            for (int i = 0; i < leafData.size(); ++i) {
+                leafData[i].resize(numParts);
+                for (int j = 0; j < numParts; ++j) {
+                    util::read_bin(ifs, leafData[i][j]);
+                }
+            }
+
+            char marker[2];
+            ifs.read(marker, 2);
+            if (strncmp(marker, "S\n", 2)) {
+                std::cerr << "ERROR: Invalid or corrupted samples file at " << path << "\n";
+                return;
+            }
+            size_t numSamplesTotal;
+            util::read_bin(ifs, numSamplesTotal);
+            samples.reserve(numSamplesTotal);
+            while (ifs) {
+                int imgIndex, imgSamps;
+                util::read_bin(ifs, imgIndex);
+                if (~max_num_images && imgIndex >= max_num_images) {
+                    std::cerr << "Image index " << imgIndex << " out of bounds, invalid samples file?\n";
+                    std::exit(0);
+                }
+                util::read_bin(ifs, imgSamps);
+                if (verbose && imgIndex % 1000 == 0 && imgIndex >= 0) {
+                    std::cout << "Reading samples for image #" << imgIndex << " with " << imgSamps << " sample pixels\n";
+                }
+                if (!ifs || imgSamps < 0) break;
+                while (imgSamps--) {
+                    samples.emplace_back();
+                    Sample& sample = samples.back();
+                    sample.index = imgIndex;
+                    util::read_bin(ifs, sample.pix[0]);
+                    util::read_bin(ifs, sample.pix[1]);
+                }
+            }
+            ifs.close();
+        }
+
+    private:
+        // Mutex to protect resources during training
+        std::mutex trainMutex;
+        // Compute information gain (expected entropy decrease) by choosing optimal threshold
+        // output into optimal_thresh.col(feature_id)
+        // best <= threshesPerSample thresholds are found and returned in arbitrary order
+        // if place_best_thresh_first then puts the absolute best threshold first, rest still arbitrary order
+        float computeOptimalThreshes2(
+            const std::vector<size_t>& indices,
+            const Eigen::MatrixXd& sample_feature_scores,
+            const Eigen::Matrix<uint8_t, Eigen::Dynamic, 1>& sample_parts,
+            int feature_id, std::vector<float>& output_threshes,
+            int threshes_per_feature) {
+
+            // Initially everything is in left set
+            RTree::Distribution distLeft(numParts), distRight(numParts);
+            distLeft.setZero();
+            distRight.setZero();
+
+            // Compute scores
+            std::vector<std::pair<float, int> > samplesByScore;
+            samplesByScore.reserve(indices.size());
+            for (size_t i = 0; i < indices.size(); ++i) {
+                samplesByScore.emplace_back(
+                        sample_feature_scores(i, feature_id), i);
+                uint8_t samplePart = sample_parts(indices[i]);
+                if (samplePart >= distLeft.size()) {
+                    std::cerr << "FATAL: Invalid sample " << int(samplePart) << " detected during RTree training, "
+                                 "please check the randomization code\n";
+                    std::exit(0);
+                }
+                distLeft[samplePart] += 1.f;
+            }
+            static auto scoreComp = [](const std::pair<float, int> & a, const std::pair<float, int> & b) {
+                return a.first < b.first;
+            };
+            std::sort(samplesByScore.begin(), samplesByScore.end(), scoreComp);
+            // std::cerr << samplesByScore.size() << "\n";
+
+            // Start everything in the left set ...
+            float lastScore = -FLT_MAX;
+            if (samplesByScore.empty()) {
+                std::cerr << "FATAL: not enough samples to compute threshes indices.size()=" << indices.size() << "\n";
+                std::exit(1);
+            }
+            std::vector<std::array<float, 2> > optimalThreshes;
+            for (size_t i = 0; i < samplesByScore.size()-1; ++i) {
+                // Update distributions for left, right sets
+                int idx = samplesByScore[i].second;
+
+                uint8_t samplePart = sample_parts(indices[idx]);
+                distLeft[samplePart] -= 1.f;
+                distRight[samplePart] += 1.f;
+                if (lastScore == samplesByScore[i].first) continue;
+                lastScore = samplesByScore[i].first;
+
+                float left_entropy = entropy(distLeft / distLeft.sum());
+                float right_entropy = entropy(distRight / distRight.sum());
+                // Compute the information gain
+                float infoGain = - ((indices.size() - i - 1) * left_entropy
+                                 + (i+1)                     * right_entropy);
+                if (infoGain > 0) {
+                    std::cerr << "FATAL: Possibly overflow detected during training, exiting. Internal data: left entropy "
+                        << left_entropy << " right entropy "
+                        << right_entropy << " information gain "
+                        << infoGain<< "\n";
+                    std::exit(2);
+                }
+                // Add to candidate threshes
+                optimalThreshes.push_back({infoGain, random_util::uniform(samplesByScore[i].first, samplesByScore[i+1].first)});
+            }
+            if (static_cast<size_t>(threshes_per_feature) < optimalThreshes.size()) {
+                std::nth_element(optimalThreshes.begin(), optimalThreshes.begin() + threshes_per_feature,
+                        optimalThreshes.end(), std::greater<std::array<float, 2> >());
+            }
+            std::nth_element(optimalThreshes.begin(), optimalThreshes.begin() + 1, optimalThreshes.end(), std::greater<std::array<float, 2> >());
+            size_t numOutputThreshes = std::min(static_cast<size_t>(threshes_per_feature), optimalThreshes.size());
+            output_threshes.reserve(numOutputThreshes);
+            output_threshes.clear();
+            for (size_t i = 0; i < numOutputThreshes; ++i) {
+                output_threshes.push_back(optimalThreshes[i][1]);
+            }
+            if (optimalThreshes.empty()) {
+                std::cerr << "FATAL: no threshes found, input indices size: " << indices.size() << "\n";
+            }
+            return optimalThreshes[0][0];
+        }
+
+        void initTraining(int num_images, int num_points_per_image, int max_tree_depth, int num_threads, bool verbose) {
+            // 1. Choose num_images random images u.a.r. from given image list
+            std::vector<int> allImages(dataLoader.dataSource.size());
+            std::iota(allImages.begin(), allImages.end(), 0);
+            chosenImages = allImages.size() > static_cast<size_t>(num_images) ?
+                random_util::choose(allImages, num_images) : std::move(allImages);
+
+            // 2. Choose num_points_per_image random foreground pixels from each image,
+            std::atomic<size_t> imageIndex(0);
+            samples.reserve(num_points_per_image * num_images);
+            auto worker = [&]() {
+                size_t i;
+                SampleVec threadSamples;
+                threadSamples.reserve(samples.size() / num_threads + 1);
+                while (true) {
+                    i = imageIndex++;
+                    if (i >= chosenImages.size()) break;
+                    if (verbose && i % 1000 == 999) {
+                        std::cerr << "Preprocessing data: " << i+1 << " of " << num_images << "\n";
+                    }
+                    cv::Mat mask = dataLoader.get(Sample(chosenImages[i], 0, 0), DATA_PART_MASK)[DATA_PART_MASK];
+                    // cv::Mat mask2 = dataLoader.get(Sample(chosenImages[i], 0, 0))[DATA_PART_MASK];
+                    // cv::hconcat(mask, mask2, mask);
+                    // cv::resize(mask, mask, mask.size() / 2);
+                    // cv::imshow("MASKCat", mask);
+                    // cv::waitKey(0);
+                    std::vector<RTree::Vec2i, Eigen::aligned_allocator<RTree::Vec2i> > candidates;
+                    for (int r = 0; r < mask.rows; ++r) {
+                        auto* ptr = mask.ptr<uint8_t>(r);
+                        for (int c = 0; c < mask.cols; ++c) {
+                            if (ptr[c] != 255) {
+                                candidates.emplace_back();
+                                candidates.back() << c, r;
+                            }
+                        }
+                    }
+                    std::vector<RTree::Vec2i, Eigen::aligned_allocator<RTree::Vec2i> > chosenCandidates =
+                        (candidates.size() > static_cast<size_t>(num_points_per_image)) ?
+                        random_util::choose(candidates, num_points_per_image) : std::move(candidates);
+                    for (auto& v : chosenCandidates) {
+                        threadSamples.emplace_back(chosenImages[i], v);
+                    }
+                }
+                std::lock_guard<std::mutex> lock(trainMutex);
+                std::move(threadSamples.begin(), threadSamples.end(), std::back_inserter(samples));
+            };
+
+            {
+                std::vector<std::thread> threads;
+                for (int i = 0; i < num_threads; ++i) {
+                    threads.emplace_back(worker);
+                }
+                for (int i = 0; i < num_threads; ++i) {
+                    threads[i].join();
+                }
+            }
+
+            if(verbose) {
+                std::cerr << "Preprocessing done, sparsely verifying data validity before training...\n";
+            }
+            for (size_t i = 0; i < samples.size(); i += std::max<size_t>(samples.size() / 100, 1)) {
+                auto& sample = samples[i];
+                cv::Mat mask = dataLoader.get(sample, DATA_PART_MASK)[DATA_PART_MASK];
+                if (mask.at<uint8_t>(sample.pix[1], sample.pix[0]) == 255) {
+                    std::cerr << "FATAL: Invalid data detected during verification: background pixels were included in samples.\n";
+                    std::exit(0);
+                }
+            }
+            if(verbose) {
+                std::cerr << "Result: data is valid\n";
+            }
+
+            nodes.resize(1);
+            /** Start with everything as samples for root node */
+            assignedNode.resize(samples.size());
+            sparse.resize(1);
+            sparse[0].resize(samples.size());
+            std::iota(sparse[0].begin(), sparse[0].end(), size_t(0));
+            currStartNode = 0;
+            depth = 1;
+        }
+
+        // Reorder samples in [start, ..., end-1] by image index to improve cache performance
+        void reorderByImage(SampleVec& samples, size_t start, size_t end) {
+            static auto sampleComp = [](const Sample & a, const Sample & b) {
+                // if (a.index == b.index) {
+                //     if (a.pix[1] == b.pix[1]) return a.pix[0] < b.pix[0];
+                //     return a.pix[1] < b.pix[1];
+                // }
+                return a.index < b.index;
+            };
+            sort(samples.begin() + start, samples.begin() + end, sampleComp);
+        }
+
+        std::vector<RTree::RNode>& nodes;
+        std::vector<RTree::Distribution>& leafData;
+        const int numParts;
+        DataLoader<DataSource> dataLoader;
+
+        /* Indices of sparse samples for each node (initially not sparse, is made sparse early in each loop) */
+        std::vector<std::vector<size_t > > sparse;
+        /* Node sample i is currently assigned to, -1 if unassigned */
+        Eigen::VectorXi assignedNode;
+
+        /** True if training has not been initialized */
+        bool needInitTraining;
+        /** Current start node */
+        int currStartNode;
+        /** Current depth */
+        int depth;
 
         // const int SAMPLES_PER_FEATURE = 60;
         std::vector<int> chosenImages;
@@ -949,7 +1867,7 @@ namespace ark {
        : depthDir(depth_dir), partMaskDir(part_mask_dir) {
            reload();
        }
-        
+
         void reload() {
             _data_paths[DATA_DEPTH].clear();
             _data_paths[DATA_PART_MASK].clear();
@@ -1013,7 +1931,7 @@ namespace ark {
     };
 
     struct AvatarDataSource {
-        AvatarDataSource(AvatarModel& ava_model, 
+        AvatarDataSource(AvatarModel& ava_model,
                          AvatarPoseSequence& pose_seq,
                          CameraIntrin& intrin,
                          cv::Size& image_size,
@@ -1106,7 +2024,7 @@ namespace ark {
         std::vector<int> seq;
         const int* partMap;
     };
- 
+
     RTree::RTree(int num_parts) : numParts(num_parts) {}
     RTree::RTree(const std::string & path) {
         if (!loadFile(path)) {
@@ -1142,7 +2060,7 @@ namespace ark {
                 ifs >> leafData[i](j);
             }
         }
-        
+
         return true;
     }
 
@@ -1208,7 +2126,7 @@ namespace ark {
             }
             const auto* inPtr = depth.ptr<float>(r);
             for (int c = 0; c < depth.cols; ++c) {
-                if (inPtr[c] <= 0.f) continue; 
+                if (inPtr[c] <= 0.f) continue;
                 pix(0) = c;
                 distr = predictRecursive(0, depth, pix);
                 for (int i = 0; i < numParts; ++i) {
@@ -1226,28 +2144,23 @@ namespace ark {
                    int num_images,
                    int num_points_per_image,
                    int num_features,
+                   int num_features_filtered,
                    int max_probe_offset,
-                   int min_samples, 
+                   int min_samples,
                    int max_tree_depth,
-                   int samples_per_feature,
+                   int min_samples_per_feature,
+                   float frac_samples_per_feature,
                    int threshes_per_feature,
                    int max_images_loaded,
-                   const std::string& samples_file,
-                   bool generate_samples_file_only
+                   const std::string& train_partial_save_path
                ) {
         nodes.reserve(1 << std::min(max_tree_depth, 22));
         FileDataSource dataSource(depth_dir, part_mask_dir);
-        Trainer<FileDataSource> trainer(nodes, leafData, dataSource, numParts, static_cast<size_t>(max_images_loaded));
-        bool shouldReadSamples = !samples_file.empty() && !generate_samples_file_only;
-        if (shouldReadSamples) {
-            trainer.readSamples(samples_file, verbose, num_images);
-        }
+        TrainerV2<FileDataSource> trainer(nodes, leafData, dataSource, numParts, static_cast<size_t>(max_images_loaded));
         trainer.train(num_images, num_points_per_image, num_features,
-                max_probe_offset, min_samples, max_tree_depth, samples_per_feature, threshes_per_feature,
-                num_threads, verbose, shouldReadSamples, generate_samples_file_only);
-        if (generate_samples_file_only) {
-            trainer.writeSamples(samples_file);
-        }
+                num_features_filtered,
+                max_probe_offset, min_samples, max_tree_depth, min_samples_per_feature, frac_samples_per_feature, threshes_per_feature,
+                num_threads, train_partial_save_path, verbose);
     }
 
     void RTree::trainFromAvatar(AvatarModel& avatar_model,
@@ -1259,28 +2172,22 @@ namespace ark {
                    int num_images,
                    int num_points_per_image,
                    int num_features,
+                   int num_features_filtered,
                    int max_probe_offset,
-                   int min_samples, 
+                   int min_samples,
                    int max_tree_depth,
-                   int samples_per_feature,
+                   int min_samples_per_feature,
+                   float frac_samples_per_feature,
                    int threshes_per_feature,
                    const int* part_map,
                    int max_images_loaded,
-                   const std::string& samples_file,
-                   bool generate_samples_file_only
+                   const std::string& train_partial_save_path
                ) {
         nodes.reserve(1 << std::min(max_tree_depth, 22));
         AvatarDataSource dataSource(avatar_model, pose_seq, intrin, image_size, num_images, part_map);
-        Trainer<AvatarDataSource> trainer(nodes, leafData, dataSource, numParts, static_cast<size_t>(max_images_loaded));
-        bool shouldReadSamples = !samples_file.empty() && !generate_samples_file_only;
-        if (shouldReadSamples) {
-            trainer.readSamples(samples_file, verbose, num_images);
-        }
-        trainer.train(num_images, num_points_per_image, num_features,
-                max_probe_offset, min_samples, max_tree_depth, samples_per_feature,
-                threshes_per_feature, num_threads, verbose, shouldReadSamples, generate_samples_file_only);
-        if (generate_samples_file_only) {
-            trainer.writeSamples(samples_file);
-        }
+        TrainerV2<AvatarDataSource> trainer(nodes, leafData, dataSource, numParts, static_cast<size_t>(max_images_loaded));
+        trainer.train(num_images, num_points_per_image, num_features, num_features_filtered,
+                max_probe_offset, min_samples, max_tree_depth, min_samples_per_feature, frac_samples_per_feature,
+                threshes_per_feature, num_threads, train_partial_save_path, verbose);
     }
 }

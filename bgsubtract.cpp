@@ -19,7 +19,7 @@ int main(int argc, char** argv) {
     int bgId, imId, padSize;
 
     po::options_description desc("Option arguments");
-    po::options_description descPositional("OpenARK Synthetic Avatar Depth Image Dataset Generator v0.1b (c) Alex Yu 2019\nPosition arguments");
+    po::options_description descPositional("OpenARK Basic Background Subtraction Visualization v0.1b (c) Alex Yu 2019\nPosition arguments");
     po::options_description descCombined("");
     desc.add_options()
         ("help", "produce help message")
@@ -37,9 +37,9 @@ int main(int argc, char** argv) {
     po::positional_options_description posopt;
     posopt.add("dataset_path", 1);
     try {
-        po::store(po::command_line_parser(argc, argv).options(descCombined) 
-                .positional(posopt).run(), 
-                vm); 
+        po::store(po::command_line_parser(argc, argv).options(descCombined)
+                .positional(posopt).run(),
+                vm);
     } catch (std::exception& e) {
         std::cerr << "Error: " << e.what() << "\n";
         std::cerr << descPositional << "\n" << desc << "\n";
@@ -103,7 +103,7 @@ int main(int argc, char** argv) {
         }
         cv::Mat vis(sub.size(), CV_8UC3);
         for (int r = 0 ; r < image.rows; ++r) {
-            auto* outptr = vis.ptr<cv::Vec3b>(r); 
+            auto* outptr = vis.ptr<cv::Vec3b>(r);
             const auto* inptr = sub.ptr<uint8_t>(r);
             for (int c = 0 ; c < image.cols; ++c) {
                 int colorIdx = colorid[inptr[c]];
@@ -113,7 +113,7 @@ int main(int argc, char** argv) {
         }
 
         for (int r = 0 ; r < image.rows; ++r) {
-            auto* outptr = vis.ptr<cv::Vec3b>(r); 
+            auto* outptr = vis.ptr<cv::Vec3b>(r);
             const auto* rgbptr = imageRGB.ptr<cv::Vec3b>(r);
             for (int c = 0 ; c < image.cols; ++c) {
                 outptr[c] = rgbptr[c] / 3 + (outptr[c] - rgbptr[c]) / 3 * 2;
@@ -126,3 +126,4 @@ int main(int argc, char** argv) {
     }
     return 0;
 }
+

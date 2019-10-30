@@ -72,8 +72,8 @@ namespace ark {
         /** xorshift-based PRNG */
         inline T randint(T lo, T hi) {
             if (hi <= lo) return lo;
-            static unsigned long x = std::random_device{}(), y = std::random_device{}(), z = std::random_device{}();
-            unsigned long t;
+            static thread_local unsigned long x = std::random_device{}(), y = std::random_device{}(), z = std::random_device{}();
+            thread_local unsigned long t;
             x ^= x << 16;
             x ^= x >> 5;
             x ^= x << 1;
