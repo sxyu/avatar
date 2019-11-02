@@ -1192,7 +1192,7 @@ namespace ark {
                 {
                     for (size_t batchid = 0; batchid < numBatches; ++batchid)
                     {
-                        std::cout << "Counting total samples matching each (feature, thresh) pair, batch " << batchid << " of " << numBatches << "...\n" << std::flush;
+                        std::cout << "Counting total samples matching each (feature, thresh) pair, batch " << batchid+1 << " of " << numBatches << "...\n" << std::flush;
                         size_t batchBegin = currStartNode + batchid * nodesPerBatch;
                         size_t batchEnd = std::min(currStartNode + (batchid + 1) * nodesPerBatch, nodes.size());
                         featureThreshCount.resize(batchEnd-batchBegin, num_features_filtered, threshes_per_feature, numParts);
@@ -1265,7 +1265,7 @@ namespace ark {
                         threads.clear();
                         // Done counting
 
-                        std::cout << "Finding optimal features, batch " << batchid << " of " << numBatches << "...\n" << std::flush;
+                        std::cout << "Finding optimal features, batch " << batchid+1 << " of " << numBatches << "...\n" << std::flush;
                         /** STEP 3 finding optimal feature */
                         {
                             Eigen::VectorXf featureCountTotal = nodeCount.rowwise().sum();
