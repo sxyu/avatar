@@ -1277,7 +1277,7 @@ namespace ark {
                                 size_t nodeid = 0;
                                 uint8_t threadIsLeaf;
                                 while (true) {
-                                    threadIsLeaf = false;
+                                    threadIsLeaf = 0;
                                     nodeid = nodeOptIndex++;
                                     if (nodeid >= batchEnd) break;
                                     if (~nodes[nodeid].leafid) continue;
@@ -1351,7 +1351,7 @@ namespace ark {
                                     }
                                 }
                             };
-                            for (int i = batchBegin - currStartNode; i < std::min<size_t>(batchEnd - currStartNode, num_threads); ++i) {
+                            for (size_t i = 0; i < std::min<size_t>(batchEnd - batchBegin, num_threads); ++i) {
                                 threads.emplace_back(nodeOptWorker);
                             }
                             for (int i = 0; i < static_cast<int>(threads.size()); ++i) {
