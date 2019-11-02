@@ -33,14 +33,22 @@ namespace {
         return entropy;
     }
 
+
+    /** Assumed depth of background (meters)
+     *  All points not on body will be set to this depth prior to training/detection
+     *  (Value is found in RTree.cpp) */
+    const float BACKGROUND_DEPTH = 20.0f;
+    // TODO: Possibly, expose background depth as a command line arg.
+    // However, I don't think it is very important.
+
     // Get depth at point in depth image, or return BACKGROUND_DEPTH
     // if in the background OR out of bounds
     inline float getDepth(const cv::Mat& depth_image, const ark::RTree::Vec2i& point) {
         if (point.y() < 0 || point.x() < 0 ||
                 point.y() >= depth_image.rows || point.x() >= depth_image.cols)
-            return ark::RTree::BACKGROUND_DEPTH;
+            return BACKGROUND_DEPTH;
         float depth = depth_image.at<float>(point.y(), point.x());
-        if (depth <= 0.0) return ark::RTree::BACKGROUND_DEPTH;
+        if (depth <= 0.0) return BACKGROUND_DEPTH;
         return depth;
     }
 
@@ -64,8 +72,6 @@ namespace {
 }
 
 namespace ark {
-    const float RTree::BACKGROUND_DEPTH = 20.f;
-
     RTree::RNode::RNode() : leafid(-1) {};
     RTree::RNode::RNode(const Vec2& u, const Vec2& v, float thresh) :
                 u(u), v(v), thresh(thresh), leafid(-1) {}
@@ -976,10 +982,11 @@ namespace ark {
                    int mem_limit_mb,
                    bool verbose) {
             if (!save_path.empty()) readSamples(save_path, verbose, num_images);
+
             if (needInitTraining) {
                 std::cerr << "Init RTree training (v2) with maximum depth " << max_tree_depth << "\n";
 
-                // Initialize new samples
+                // Initialize images, samples (points) in each image, etc.
                 initTraining(num_images, num_points_per_image, max_tree_depth, num_threads, verbose);
                 needInitTraining = false;
                 std::cerr << "Init complete\n";
@@ -992,7 +999,7 @@ namespace ark {
             }
 
 
-            // Train
+            // Train tree
 
             /* Current features for each node */
             std::vector<std::vector<Feature, Eigen::aligned_allocator<Feature> > > feats;
@@ -1665,7 +1672,7 @@ namespace ark {
                     std::exit(0);
                 }
                 util::read_bin(ifs, imgSamps);
-                if (verbose && imgIndex % 1000 == 0 && imgIndex >= 0) {
+                if (verbose && imgIndex % 50000 == 0 && imgIndex >= 0) {
                     std::cout << "Reading samples for image #" << imgIndex << " with " << imgSamps << " sample pixels\n";
                 }
                 if (!ifs || imgSamps < 0) break;

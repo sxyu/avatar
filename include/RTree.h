@@ -18,13 +18,7 @@ namespace ark {
         /** Probability distribution over numParts parts */
         typedef Eigen::VectorXf Distribution;
 
-        /** Assumed depth of background (meters)
-         *  All points not on body will be set to this depth prior to training/detection
-         *  (Value is found in RTree.cpp) */
-        static const float BACKGROUND_DEPTH;
-        // TODO: Possibly, expose background depth as a command line arg.
-        // However, I don't think it is very important.
-
+        /** Tree node, containing feature/leaf data and indices of children */
         struct RNode {
             RNode();
             RNode(const Vec2& u, const Vec2& v, float thresh);
