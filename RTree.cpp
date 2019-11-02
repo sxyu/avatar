@@ -1190,20 +1190,20 @@ namespace ark {
                 /* STEP 2 Concurrently count the number of samples exceeding each feature/thresh pair */
                 std::vector<uint8_t> isLeaf(numNodes);
                 {
-                    featureThreshCount.resize(nodesPerBatch, num_features_filtered, threshes_per_feature, numParts);
-                    nodeCount.resize(nodesPerBatch, numParts);
                     for (size_t batchid = 0; batchid < numBatches; ++batchid)
                     {
                         std::cout << "Counting total samples matching each (feature, thresh) pair, batch " << batchid << " of " << numBatches << "...\n" << std::flush;
                         size_t batchBegin = currStartNode + batchid * nodesPerBatch;
                         size_t batchEnd = std::min(currStartNode + (batchid + 1) * nodesPerBatch, nodes.size());
+                        featureThreshCount.resize(batchEnd-batchBegin, num_features_filtered, threshes_per_feature, numParts);
+                        nodeCount.resize(batchEnd-batchBegin, numParts);
                         featureThreshCount.setZero();
                         nodeCount.setZero();
                         size_t sampCount = 0;
                         auto countWorker = [&](size_t samp_left, size_t samp_right) {
                             Eigen::Tensor<float, 4> threadFeatureThreshCount;
-                            Eigen::MatrixXf threadNodeCount(nodesPerBatch, numParts);
-                            threadFeatureThreshCount.resize(nodesPerBatch, num_features_filtered, threshes_per_feature, numParts);
+                            Eigen::MatrixXf threadNodeCount(batchEnd-batchBegin, numParts);
+                            threadFeatureThreshCount.resize(batchEnd-batchBegin, num_features_filtered, threshes_per_feature, numParts);
                             threadFeatureThreshCount.setZero();
                             threadNodeCount.setZero();
                             for (size_t sampid = samp_left; sampid < samp_right; ++sampid) {
