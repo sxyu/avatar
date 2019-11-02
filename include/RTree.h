@@ -79,6 +79,7 @@ namespace ark {
                    float frac_samples_per_feature = 0.01f,
                    int threshes_per_feature = 15,
                    int max_images_loaded = 50,
+                   int mem_limit_mb = 12000,
                    const std::string& train_partial_save_path = ""
                    );
 
@@ -105,6 +106,7 @@ namespace ark {
                    int threshes_per_feature = 15,
                    const int* part_map = nullptr, // part map
                    int max_images_loaded = 50,
+                   int mem_limit_mb = 12000,
                    const std::string& train_partial_save_path = ""
                    );
 

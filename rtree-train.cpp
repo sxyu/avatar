@@ -13,7 +13,8 @@ int main(int argc, char** argv) {
     std::string data_path, output_path, intrin_path, resume_file;
     bool verbose, preload;
     int num_threads, num_images, num_points_per_image, num_features, num_features_filtered, max_probe_offset, min_samples, max_tree_depth,
-        min_samples_per_feature, threshes_per_feature, cache_size;
+        min_samples_per_feature, threshes_per_feature, cache_size,
+        mem_limit_mb;
     float frac_samples_per_feature;
     cv::Size size;
 
@@ -48,6 +49,7 @@ int main(int argc, char** argv) {
         ("height", po::value<int>(&size.height)->default_value(720), "Height of generated imaes; only useful if using synthetic data input")
         ("cache_size,c", po::value<int>(&cache_size)->default_value(50), "Max number of images in cache during training")
         ("resume,s", po::value<std::string>(&resume_file)->default_value(""), "Training save state file (previously known as 'samples' file, now more general).")
+        ("memory,M", po::value<int>(&mem_limit_mb)->default_value(12000), "Maximum training memory (for counting part; actual usage may be 2x) in MB.")
     ;
 
     descPositional.add_options()
@@ -115,11 +117,11 @@ int main(int argc, char** argv) {
         }
         rtree.trainFromAvatar(model, poseSequence, intrin, size, num_threads, verbose, num_images, num_points_per_image,
                 num_features, num_features_filtered, max_probe_offset, min_samples, max_tree_depth, min_samples_per_feature, frac_samples_per_feature,
-                threshes_per_feature, ark::part_map::SMPL_JOINT_TO_PART_MAP, cache_size, resume_file);
+                threshes_per_feature, ark::part_map::SMPL_JOINT_TO_PART_MAP, cache_size, mem_limit_mb, resume_file);
     } else {
         rtree.train(data_path + "/depth_exr", data_path + "/part_mask", num_threads, verbose, num_images, num_points_per_image,
                 num_features, num_features_filtered, max_probe_offset, min_samples, max_tree_depth, min_samples_per_feature, frac_samples_per_feature, threshes_per_feature,
-                cache_size, resume_file);
+                cache_size, mem_limit_mb, resume_file);
     }
     rtree.exportFile(output_path);
 
