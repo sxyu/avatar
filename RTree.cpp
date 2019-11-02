@@ -1032,7 +1032,7 @@ namespace ark {
             size_t memAvailable = size_t(mem_limit_mb) * 1024ULL * 1024ULL;
             size_t memPerNode = num_features_filtered *
                 (threshes_per_feature + 1) * numParts * (num_threads + 1) * 4;
-            size_t nodesPerBatch = memAvailable / memPerNode;
+            size_t nodesPerBatch = std::max<size_t>(memAvailable / memPerNode, 1ULL);
             /* Main loop, exactly once per tree level */
             for (; depth <= max_tree_depth; ++depth) {
                 int numNodes = nodes.size() - currStartNode;
@@ -1202,8 +1202,8 @@ namespace ark {
                         size_t sampCount = 0;
                         auto countWorker = [&](size_t samp_left, size_t samp_right) {
                             Eigen::Tensor<float, 4> threadFeatureThreshCount;
-                            Eigen::MatrixXf threadNodeCount(numNodes, numParts);
-                            threadFeatureThreshCount.resize(numNodes, num_features_filtered, threshes_per_feature, numParts);
+                            Eigen::MatrixXf threadNodeCount(nodesPerBatch, numParts);
+                            threadFeatureThreshCount.resize(nodesPerBatch, num_features_filtered, threshes_per_feature, numParts);
                             threadFeatureThreshCount.setZero();
                             threadNodeCount.setZero();
                             for (size_t sampid = samp_left; sampid < samp_right; ++sampid) {
@@ -1241,11 +1241,11 @@ namespace ark {
 
                                     for(int threshid = 0; threshid < static_cast<int>(feature.threshes.size()); ++ threshid) {
                                         if (score < feature.threshes[threshid]) {
-                                            threadFeatureThreshCount(nodeid - currStartNode, featid, threshid, partid) += 1.0f;
+                                            threadFeatureThreshCount(nodeid - batchBegin, featid, threshid, partid) += 1.0f;
                                         }
                                     }
                                 }
-                                threadNodeCount(nodeid - currStartNode, partid) += 1.0f;
+                                threadNodeCount(nodeid - batchBegin, partid) += 1.0f;
                             }
 
                             {
@@ -1272,31 +1272,31 @@ namespace ark {
                             Eigen::array<float, 1> _dims({3});
                             Eigen::Tensor<float, 3> featureThreshCountTotal = featureThreshCount.sum(_dims);
                             // Compute optimal feature/thresh pairs from counts
-                            std::atomic<size_t> nodeOptIndex(currStartNode);
+                            std::atomic<size_t> nodeOptIndex(batchBegin);
                             auto nodeOptWorker = [&]() {
-                                int nodeid = 0;
+                                size_t nodeid = 0;
                                 uint8_t threadIsLeaf;
                                 while (true) {
                                     threadIsLeaf = false;
                                     nodeid = nodeOptIndex++;
-                                    if (nodeid >= static_cast<int>(nodes.size())) break;
+                                    if (nodeid >= batchEnd) break;
                                     if (~nodes[nodeid].leafid) continue;
                                     float bestEntropy = FLT_MAX, bestThresh;
                                     Feature bestFeature;
                                     std::vector<Feature, Eigen::aligned_allocator<Feature> > & nodeFeatures = feats[nodeid - currStartNode];
-                                    float total = featureCountTotal(nodeid - currStartNode);
+                                    float total = featureCountTotal(nodeid - batchBegin);
                                     float bestPartTotal = -1.; // DEBUG
                                     for (int featid = 0; featid < static_cast<int>(nodeFeatures.size()); ++featid) {
                                         Feature& feature = nodeFeatures[featid];
                                         for(int threshid = 0; threshid < static_cast<int>(feature.threshes.size()); ++ threshid) {
                                             float entropy = 0.f;
-                                            float partTotal = featureThreshCountTotal(nodeid - currStartNode, featid, threshid);
+                                            float partTotal = featureThreshCountTotal(nodeid - batchBegin, featid, threshid);
                                             float otherPartTotal = total - partTotal;
                                             float partFrac = partTotal / total, otherFrac = 1.f - partFrac;
                                             for (int partid = 0; partid < numParts; ++partid) {
-                                                float p = featureThreshCount(nodeid - currStartNode, featid, threshid, partid) / partTotal;
-                                                float q = (nodeCount(nodeid - currStartNode, partid) -
-                                                        featureThreshCount(nodeid - currStartNode, featid, threshid, partid)) / otherPartTotal;
+                                                float p = featureThreshCount(nodeid - batchBegin, featid, threshid, partid) / partTotal;
+                                                float q = (nodeCount(nodeid - batchBegin, partid) -
+                                                        featureThreshCount(nodeid - batchBegin, featid, threshid, partid)) / otherPartTotal;
                                                 if (p > 1e-12) entropy -= p * log2(p) * partFrac;
                                                 if (q > 1e-12) entropy -= q * log2(q) * otherFrac;
                                             }
@@ -1326,9 +1326,9 @@ namespace ark {
                                         // Max depth reached, force this to be a leaf
                                         threadIsLeaf = 4;
                                     }
-                                    // Only display for first one (else gets too messy
-                                    if (verbose && nodeid == currStartNode) {
-                                        std::cout<< "[First node in layer] Min expected entropy: " << bestEntropy << " thresh: " << bestThresh <<" u:" << bestFeature.u.transpose() << " v:" << bestFeature.v.transpose() << " split:" << bestPartTotal << "," << total - bestPartTotal << " detect leaf? ";
+                                    // Only display for first one (else gets too messy)
+                                    if (verbose && nodeid == batchBegin) {
+                                        std::cout<< "[First node in batch] Min expected entropy: " << bestEntropy << " thresh: " << bestThresh <<" u:" << bestFeature.u.transpose() << " v:" << bestFeature.v.transpose() << " split:" << bestPartTotal << "," << total - bestPartTotal << " detect leaf? ";
 
                                         switch(threadIsLeaf) {
                                             case 0: std::cout << "NO"; break;
@@ -1363,7 +1363,7 @@ namespace ark {
                 }
 
                 std::cout << "Creating new nodes and leaves\n" << std::flush;
-                /** STEP 3 making leaves and children */
+                /** STEP 4 making leaves and children */
                 int oldStartNode = currStartNode;
                 currStartNode = static_cast<int>(nodes.size());
                 {
@@ -1408,7 +1408,7 @@ namespace ark {
                 sparse.resize(newNumNodes);
                 std::cout << "Splitting interval for next tree level...\n" << std::flush;
 
-                /** STEP 3 splitting nodes and preparing for next level */
+                /** STEP 5 splitting nodes and preparing for next level */
                 // Split non-leaf nodes and add leaves
                 auto splitWorker = [&](size_t samp_left, size_t samp_right) {
                     for (size_t sampid = samp_left; sampid < samp_right; ++sampid) {
