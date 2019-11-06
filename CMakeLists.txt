@@ -49,7 +49,7 @@ elseif( MSVC )
     if( ${OPENARK_FFAST_MATH} )
         set( CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /fp:fast" )
     endif()
-endif ( CMAKE_COMPILER_IS_GNUCXX )
+endif ( )
 
 set( Boost_USE_STATIC_LIBS ON )
 set( Boost_USE_STATIC ON )
