@@ -2517,7 +2517,7 @@ namespace ark {
                 float left_entropy = entropy(distLeft / distLeft.sum());
                 float right_entropy = entropy(distRight / distRight.sum());
                 // Compute the information gain
-                float infoGain = - ((end - start - i - 1) * left_entropy
+                float infoGain = - ((samplesByScore.size() - i - 1) * left_entropy
                                  + (i+1)                 * right_entropy);
                 if (infoGain > 0) {
                     std::cerr << "FATAL ERROR: Possibly overflow detected during training, exiting. Internal data: left entropy "
