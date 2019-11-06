@@ -2108,10 +2108,6 @@ namespace ark {
             }
             bool firstTime = samples.empty();
             initTraining(num_images, num_points_per_image, max_tree_depth, num_threads, verbose);
-            if (save_path.size() && firstTime) {
-                std::cout << "Saving to " << save_path << "\n";
-                writeSamples(save_path);
-            }
 
             std::cout << "\nInit RTree (v3) training with maximum depth " << max_tree_depth << "\n" << std::flush;
 
@@ -2131,6 +2127,10 @@ namespace ark {
                 nodeInterval.reserve(nodes.capacity());
                 nodeInterval[0][0] = 0;
                 nodeInterval[0][1] = samples.size();
+                if (save_path.size()) {
+                    std::cout << "Saving to " << save_path << "\n" << std::flush;
+                    writeSamples(save_path);
+                }
             }
 
             trainFromNode(0, max_tree_depth);
@@ -2483,7 +2483,12 @@ namespace ark {
 
             // Compute scores
             std::vector<std::pair<float, int> > samplesByScore;
-            for (size_t i = start; i < end; ++i) {
+
+            size_t tstep;
+            if (end - start > 100000000) tstep = 4;
+            else if (end - start > 10000000) tstep = 2;
+            else tstep = 1;
+            for (size_t i = start; i < end; i += tstep) {
                 const Sample3& sample = samples[i];
                 samplesByScore.emplace_back(
                         scoreByFeature(data[sample.index],
@@ -2533,10 +2538,68 @@ namespace ark {
         // Split samples {start ... end-1} by feature+thresh in-place and return the dividing index
         // left (less) set willInit  be {start ... idx-1}, right (greater) set is {idx ... end-1}
         size_t split(size_t start, size_t end, const Feature& feature, float thresh) {
+            // size_t nextIndex = start;
+            // for (size_t i = start; i < end; ++i) {
+            //     const Sample3& sample = samples[i];
+            //     if (scoreByFeature(data[sample.index],
+            //                 sample.pix, feature.u, feature.v) < thresh) {
+            //         if (nextIndex != i) {
+            //             std::swap(samples[nextIndex], samples[i]);
+            //         }
+            //         ++nextIndex;
+            //     }
+            // }
+            // return nextIndex;
+            //
+            size_t nextIndex = start;
+            // SampleVec temp;
+            // temp.reserve(end-start / 2);
+            // More concurrency (LOL)
+            std::vector<SampleVec3> workerLefts(numThreads),
+                                   workerRights(numThreads);
+            auto worker = [&](int tid, size_t left, size_t right) {
+                auto& workerLeft = workerLefts[tid];
+                auto& workerRight = workerRights[tid];
+                workerLeft.reserve((right - left) / 2);
+                workerRight.reserve((right - left) / 2);
+                for (size_t i = left; i < right; ++i) {
+                    const Sample3& sample = samples[i];
+                    if (scoreByFeature(data[sample.index],
+                                sample.pix, feature.u, feature.v) < thresh) {
+                        workerLeft.push_back(samples[i]);
+                    } else {
+                        workerRight.push_back(samples[i]);
+                    }
+                }
+            };
+            size_t step = (end-start) / numThreads;
+            std::vector<std::thread> threadMgr;
+            for (int i = 0; i < numThreads - 1; ++i) {
+                threadMgr.emplace_back(worker, i,
+                        start + step * i, start + step * (i + 1));
+            }
+            threadMgr.emplace_back(worker, numThreads - 1, start + step * (numThreads-1), end);
+            for (int i = 0; i < numThreads; ++i) {
+                threadMgr[i].join();
+                std::copy(workerLefts[i].begin(), workerLefts[i].end(), samples.begin() + nextIndex);
+                nextIndex += workerLefts[i].size();
+            }
+            size_t splitIndex = nextIndex;
+            for (int i = 0; i < numThreads; ++i) {
+                std::copy(workerRights[i].begin(), workerRights[i].end(), samples.begin() + nextIndex);
+                nextIndex += workerRights[i].size();
+            }
+            if (nextIndex != end) {
+                std::cerr << "FATAL: Tree internal node splitting failed, "
+                    "next index mismatch " << nextIndex << " != " << end << ", something is fishy\n";
+                std::exit(0);
+            }
+            return splitIndex;
+            /*
             size_t nextIndex = start;
             for (size_t i = start; i < end; ++i) {
-                const Sample3& sample = samples[i];
-                if (scoreByFeature(data[sample.index],
+                const Sample& sample = samples[i];
+                if (scoreByFeature(dataLoader.get(sample)[DATA_DEPTH],
                             sample.pix, feature.u, feature.v) < thresh) {
                     if (nextIndex != i) {
                         std::swap(samples[nextIndex], samples[i]);
@@ -2544,7 +2607,10 @@ namespace ark {
                     ++nextIndex;
                 }
             }
+            reorderByImage(samples, start, nextIndex);
+            reorderByImage(samples, nextIndex, end);
             return nextIndex;
+            */
         }
 
         enum {
