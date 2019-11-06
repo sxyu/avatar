@@ -38,6 +38,7 @@ namespace ark {
 
             // Leaf data
             int leafid;
+            EIGEN_MAKE_ALIGNED_OPERATOR_NEW;
         };
 
         /** Create empty RTree with number of different parts */
@@ -110,7 +111,7 @@ namespace ark {
                    const std::string& train_partial_save_path = ""
                    );
 
-        std::vector<RNode> nodes;
+        std::vector<RNode, Eigen::aligned_allocator<RNode> > nodes;
         std::vector<Distribution> leafData;
         int numParts;
 

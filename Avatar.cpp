@@ -70,76 +70,80 @@ namespace {
             const cv::Size& image_size,
             const std::vector<cv::Point2f>& projected,
             const ark::CloudType& model_points,
-            const cv::Vec3i& face) {
-        std::pair<double, int> xf[3] =
+            // int face_id,
+            // const ark::MeshType& mesh,
+            const cv::Vec3i& face
+            ) {
+        // const auto face = mesh.col(face_id);
+        std::pair<double, int> yf[3] =
         {
-            {projected[face[0]].x, 0},
-            {projected[face[1]].x, 1},
-            {projected[face[2]].x, 2}
+            {projected[face(0)].y, 0},
+            {projected[face(1)].y, 1},
+            {projected[face(2)].y, 2}
         };
-        std::sort(xf, xf+3);
+        std::sort(yf, yf+3);
 
         // reorder points for convenience
-        auto a = projected[face[xf[0].second]],
-             b = projected[face[xf[1].second]],
-             c = projected[face[xf[2].second]];
-        a.x = std::floor(a.x);
-        c.x = std::ceil(c.x);
-        if (a.x == c.x) return;
-        const auto az = model_points(2, face[xf[0].second]),
-              bz = model_points(2, face[xf[1].second]),
-              cz = model_points(2, face[xf[2].second]);
+        auto a = projected[face(yf[0].second)],
+             b = projected[face(yf[1].second)],
+             c = projected[face(yf[2].second)];
+        a.y = std::floor(a.y);
+        c.y = std::ceil(c.y);
+        if (a.y == c.y) return;
+        const auto az = model_points(2, face(yf[0].second)),
+              bz = model_points(2, face(yf[1].second)),
+              cz = model_points(2, face(yf[2].second));
 
-        int minxi = std::max<int>(a.x, 0),
-            maxxi = std::min<int>(c.x, image_size.width-1),
-            midxi = std::floor(b.x);
+        int minyi = std::max<int>(a.y, 0),
+            maxyi = std::min<int>(c.y, image_size.height-1),
+            midyi = std::floor(b.y);
 
-        double denom = 1.0 / ((b.y - c.y) * (a.x - c.x) + (c.x - b.x) * (a.y - c.y));
-        if (a.x != b.x) {
-            double mhi = (c.y-a.y)/(c.x-a.x);
-            double bhi = a.y - a.x * mhi;
-            double mlo = (b.y-a.y)/(b.x-a.x);
-            double blo = a.y - a.x * mlo;
-            if (b.y > c.y) {
+        float denom = 1.0f / ((b.x - c.x) * (a.y - c.y) + (c.y - b.y) * (a.x - c.x));
+        if (a.y != b.y) {
+            float mhi = (c.x-a.x)/(c.y-a.y);
+            float bhi = a.x - a.y * mhi;
+            float mlo = (b.x-a.x)/(b.y-a.y);
+            float blo = a.x - a.y * mlo;
+            if (b.x > c.x) {
                 std::swap(mlo, mhi);
                 std::swap(blo, bhi);
             }
-            for (int i = minxi; i <= std::min(midxi, image_size.width-1); ++i) {
-                int minyi = std::max<int>(std::floor(mlo * i + blo), 0),
-                    maxyi = std::min<int>(std::ceil(mhi * i + bhi), image_size.height-1);
-                if (minyi > maxyi) continue;
+            for (int i = minyi; i <= std::min(midyi, image_size.height-1); ++i) {
+                int minxi = std::max<int>(std::floor(mlo * i + blo), 0),
+                    maxxi = std::min<int>(std::ceil(mhi * i + bhi), image_size.width-1);
+                if (minxi > maxxi) continue;
 
-                double w1v = (b.y - c.y) * (i - c.x);
-                double w2v = (c.y - a.y) * (i - c.x);
-                for (int j = minyi; j <= maxyi; ++j) {
-                    double w1 = (w1v + (c.x - b.x) * (j - c.y)) * denom;
-                    double w2 = (w2v + (a.x - c.x) * (j - c.y)) * denom;
-                    output_depth.at<float>(j, i) =
-                        static_cast<float>(w1 * az + w2 * bz + (1. - w1 - w2) * cz);
+                float w1v = (b.x - c.x) * (i - c.y);
+                float w2v = (c.x - a.x) * (i - c.y);
+                auto* ptr = output_depth.ptr<float>(i);
+                for (int j = minxi; j <= maxxi; ++j) {
+                    float w1 = (w1v + (c.y - b.y) * (j - c.x)) * denom;
+                    float w2 = (w2v + (a.y - c.y) * (j - c.x)) * denom;
+                    ptr[j] = w1 * az + w2 * bz + (1.f - w1 - w2) * cz;
                 }
             }
         }
-        if (b.x != c.x) {
-            double mhi = (c.y-a.y)/(c.x-a.x);
-            double bhi = a.y - a.x * mhi;
-            double mlo = (c.y-b.y)/(c.x-b.x);
-            double blo = b.y - b.x * mlo;
-            if (b.y > a.y) {
+        if (b.y != c.y) {
+            float mhi = (c.x-a.x)/(c.y-a.y);
+            float bhi = a.x - a.y * mhi;
+            float mlo = (c.x-b.x)/(c.y-b.y);
+            float blo = b.x - b.y * mlo;
+            if (b.x > a.x) {
                 std::swap(mlo, mhi);
                 std::swap(blo, bhi);
             }
-            for (int i = std::max(midxi, 0)+1; i <= maxxi; ++i) {
-                int minyi = std::max<int>(std::floor(mlo * i + blo), 0),
-                    maxyi = std::min<int>(std::ceil(mhi * i + bhi), image_size.height-1);
-                if (minyi > maxyi) continue;
+            for (int i = std::max(midyi, 0)+1; i <= maxyi; ++i) {
+                int minxi = std::max<int>(std::floor(mlo * i + blo), 0),
+                    maxxi = std::min<int>(std::ceil(mhi * i + bhi), image_size.width-1);
+                if (minxi > maxxi) continue;
 
-                double w1v = (b.y - c.y) * (i - c.x);
-                double w2v = (c.y - a.y) * (i - c.x);
-                for (int j = minyi; j <= maxyi; ++j) {
-                    double w1 = (w1v + (c.x - b.x) * (j - c.y)) * denom;
-                    double w2 = (w2v + (a.x - c.x) * (j - c.y)) * denom;
-                    output_depth.at<float>(j, i) =
-                        static_cast<float>(w1 * az + w2 * bz + (1. - w1 - w2) * cz);
+                float w1v = (b.x - c.x) * (i - c.y);
+                float w2v = (c.x - a.x) * (i - c.y);
+                auto* ptr = output_depth.ptr<float>(i);
+                for (int j = minxi; j <= maxxi; ++j) {
+                    float w1 = (w1v + (c.y - b.y) * (j - c.x)) * denom;
+                    float w2 = (w2v + (a.y - c.y) * (j - c.x)) * denom;
+                    ptr[j] = w1 * az + w2 * bz + (1.f - w1 - w2) * cz;
                 }
             }
         }
@@ -250,70 +254,65 @@ namespace {
     }
 
     /** Paint projected triangle on int image (CV_32I) by to single color */
+    template<class T>
     inline void paintTriangleSingleColor(
             cv::Mat& output_image,
             const cv::Size& image_size,
             const std::vector<cv::Point2f>& projected,
             const cv::Vec3i& face,
-            int color) {
-        std::pair<double, int> xf[3] =
+            T color) {
+        std::pair<double, int> yf[3] =
         {
-            {projected[face[0]].x, 0},
-            {projected[face[1]].x, 1},
-            {projected[face[2]].x, 2}
+            {projected[face[0]].y, 0},
+            {projected[face[1]].y, 1},
+            {projected[face[2]].y, 2}
         };
-        std::sort(xf, xf+3);
+        std::sort(yf, yf+3);
 
         // reorder points for convenience
-        auto a = projected[face[xf[0].second]],
-        b = projected[face[xf[1].second]],
-        c = projected[face[xf[2].second]];
-        a.x = std::floor(a.x);
-        c.x = std::ceil(c.x);
-        if (a.x == c.x) return;
+        auto a = projected[face[yf[0].second]],
+        b = projected[face[yf[1].second]],
+        c = projected[face[yf[2].second]];
+        a.y = std::floor(a.y);
+        c.y = std::ceil(c.y);
+        if (a.y == c.y) return;
 
-        int minxi = std::max<int>(a.x, 0),
-            maxxi = std::min<int>(c.x, image_size.width-1),
-            midxi = std::floor(b.x);
+        int minyi = std::max<int>(a.y, 0),
+            maxyi = std::min<int>(c.y, image_size.height-1),
+            midyi = std::floor(b.y);
 
-        if (a.x != b.x) {
-            double mhi = (c.y-a.y)/(c.x-a.x);
-            double bhi = a.y - a.x * mhi;
-            double mlo = (b.y-a.y)/(b.x-a.x);
-            double blo = a.y - a.x * mlo;
-            if (b.y > c.y) {
+        if (a.y != b.y) {
+            double mhi = (c.x-a.x)/(c.y-a.y);
+            double bhi = a.x - a.y * mhi;
+            double mlo = (b.x-a.x)/(b.y-a.y);
+            double blo = a.x - a.y * mlo;
+            if (b.x > c.x) {
                 std::swap(mlo, mhi);
                 std::swap(blo, bhi);
             }
-            for (int i = minxi; i <= std::min(midxi, image_size.width-1); ++i) {
-                int minyi = std::max<int>(std::floor(mlo * i + blo), 0),
-                    maxyi = std::min<int>(std::ceil(mhi * i + bhi), image_size.height-1);
-                if (minyi > maxyi) continue;
-
-                for (int j = minyi; j <= maxyi; ++j) {
-                    output_image.at<int32_t>(j, i) = color;
-                }
+            for (int i = minyi; i <= std::min(midyi, image_size.height-1); ++i) {
+                int minxi = std::max<int>(std::floor(mlo * i + blo), 0),
+                    maxxi = std::min<int>(std::ceil(mhi * i + bhi), image_size.width-1);
+                if (minxi > maxxi) continue;
+                T* ptr = output_image.ptr<T>(i);
+                std::fill(ptr + minxi, ptr + maxxi, color);
             }
         }
-        if (b.x != c.x) {
-            double mhi = (c.y-a.y)/(c.x-a.x);
-            double bhi = a.y - a.x * mhi;
-            double mlo = (c.y-b.y)/(c.x-b.x);
-            double blo = b.y - b.x * mlo;
-            if (b.y > a.y) {
+        if (b.y != c.y) {
+            double mhi = (c.x-a.x)/(c.y-a.y);
+            double bhi = a.x - a.y * mhi;
+            double mlo = (c.x-b.x)/(c.y-b.y);
+            double blo = b.x - b.y * mlo;
+            if (b.x > a.x) {
                 std::swap(mlo, mhi);
                 std::swap(blo, bhi);
             }
-            for (int i = std::max(midxi, 0)+1; i <= maxxi; ++i) {
-                int minyi = std::max<int>(std::floor(mlo * i + blo), 0),
-                    maxyi = std::min<int>(std::ceil(mhi * i + bhi), image_size.height-1);
-                if (minyi > maxyi) continue;
-
-                double w1v = (b.y - c.y) * (i - c.x);
-                double w2v = (c.y - a.y) * (i - c.x);
-                for (int j = minyi; j <= maxyi; ++j) {
-                    output_image.at<int32_t>(j, i) = color;
-                }
+            for (int i = std::max(midyi, 0)+1; i <= maxyi; ++i) {
+                int minxi = std::max<int>(std::floor(mlo * i + blo), 0),
+                    maxxi = std::min<int>(std::ceil(mhi * i + bhi), image_size.width-1);
+                if (minxi > maxxi) continue;
+                T* ptr = output_image.ptr<T>(i);
+                std::fill(ptr + minxi, ptr + maxxi, color);
             }
         }
     }
@@ -489,7 +488,6 @@ namespace ark {
     }
 
     void Avatar::update() {
-        // BEGIN_PROFILE;
 
         /** Apply shape keys */
         shapedCloudVec.noalias() = model.keyClouds * w + model.baseCloud; 
@@ -753,9 +751,19 @@ namespace ark {
 
         cv::Mat renderedDepth = cv::Mat::zeros(image_size, CV_32F);
         for (int i = 0; i < ava.model.numFaces();++i) {
-            paintDepthTriangleBary(renderedDepth, image_size, projected, ava.cloud, faces[i].second);
+            auto& a = ava.cloud.col(faces[i].second[0]);
+            auto& b = ava.cloud.col(faces[i].second[1]);
+            auto& c = ava.cloud.col(faces[i].second[2]);
+            Eigen::Vector3d ab = b-a, ac = c-a;
+            double zcross = fabs(ab.cross(ac).normalized().z());
+            if (zcross < 0.1) {
+                paintTriangleSingleColor(renderedDepth, image_size, projected, faces[i].second, 0);
+            }
+            else {
+                paintDepthTriangleBary(renderedDepth, image_size, projected, ava.cloud, faces[i].second);
+            }
         }
-        return cv::max(renderedDepth, 0.0f);
+        return renderedDepth;
     }
 
     cv::Mat AvatarRenderer::renderPartMask(const cv::Size& image_size, const int* part_map) const {
@@ -769,7 +777,17 @@ namespace ark {
         cv::Mat partMaskMap = cv::Mat::zeros(image_size, CV_8U);
         partMaskMap.setTo(255);
         for (int i = 0; i < ava.model.numFaces(); ++i) {
-            paintPartsTriangleNN(partMaskMap, image_size, projected, ava.model.assignedJoints, faces[i].second, part_map);
+            auto& a = ava.cloud.col(faces[i].second[0]);
+            auto& b = ava.cloud.col(faces[i].second[1]);
+            auto& c = ava.cloud.col(faces[i].second[2]);
+            Eigen::Vector3d ab = b-a, ac = c-a;
+            double zcross = fabs(ab.cross(ac).normalized().z());
+            if (zcross < 0.1) {
+                paintTriangleSingleColor<uint8_t>(partMaskMap, image_size, projected, faces[i].second, uint8_t(255));
+            }
+            else {
+                paintPartsTriangleNN(partMaskMap, image_size, projected, ava.model.assignedJoints, faces[i].second, part_map);
+            }
         }
         return partMaskMap;
     }

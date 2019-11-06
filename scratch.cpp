@@ -9,6 +9,7 @@
 #include "Avatar.h"
 #include "AvatarPCL.h"
 #include "AvatarRenderer.h"
+#include "SparseImage.h"
 #include "ViconSkeleton.h"
 #include "Util.h"
 #define BEGIN_PROFILE auto start = std::chrono::high_resolution_clock::now()
@@ -299,7 +300,41 @@ void __avatarGUI()
 // }
 
 int main(int argc, char** argv) {
-    __avatarGUI();
+    // __avatarGUI();
     // avatarViconAlign();
+    const ark::AvatarModel model;
+    ark::CameraIntrin intrin;
+    intrin.clear();
+    intrin.fx = 606.438;
+    intrin.fy = 606.351;
+    intrin.cx = 637.294;
+    intrin.cy = 366.992;
+    BEGIN_PROFILE;
+    ark::Avatar ava(model);
+    PROFILE(Load);
+    ava.randomize();
+    PROFILE(Random);
+    ava.update();
+    PROFILE(Update);
+    ark::AvatarRenderer renderer(ava, intrin);
+    cv::Size size(1280, 720);
+    PROFILE(Prep);
+    
+    cv::Mat m = renderer.renderDepth(size);
+    PROFILE(RENDER_DEPTH);
+    cout << m.step[0] * m.rows << "\n";
+    ark::SparseImage spm(m);
+    cout << "memory new: " << spm.data.size() * sizeof(float) + spm.starts.size() * sizeof(int) << "\n";
+    PROFILE(CONVERT);
+    cv::Mat rest = spm.toMat();
+    PROFILE(CONVERTBack);
+    
+    cv::Mat m2 = renderer.renderPartMask(size);
+    PROFILE(RENDER_PART_MASK);
+    cv::imshow("render", m);
+    cv::imwrite("rend_rest.exr", rest);
+    cv::waitKey(0);
+    cv::imshow("render", m2);
+    cv::waitKey(0);
     return 0;
 }

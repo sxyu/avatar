@@ -117,6 +117,7 @@ set(
   AvatarOptimizer.cpp
   Calibration.cpp 
   GaussianMixture.cpp 
+  SparseImage.cpp
   Util.cpp 
   ViconSkeleton.cpp 
 )
@@ -132,6 +133,7 @@ set(
   ${INCLUDE_DIR}/Config.h
   ${INCLUDE_DIR}/GaussianMixture.h
   ${INCLUDE_DIR}/RTree.h
+  ${INCLUDE_DIR}/SparseImage.h
   ${INCLUDE_DIR}/Util.h
   ${INCLUDE_DIR}/Version.h
   ${INCLUDE_DIR}/ViconSkeleton.h
