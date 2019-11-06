@@ -28,8 +28,7 @@ int main(int argc, char** argv) {
         ("output,o", po::value<std::string>(&output_path)->default_value("output.rtree"), "Output file")
         ("threads,j", po::value<int>(&num_threads)->default_value(std::thread::hardware_concurrency()), "Number of threads")
         ("verbose,v", po::bool_switch(&verbose), "Enable verbose output")
-        ("preload", po::bool_switch(&preload), "Preload avatar pose sequence in memory to speed up random pose; "
-                                               "may take multiple GBs of RAM, only useful if using synthetic data input")
+        ("preload", po::bool_switch(&preload), "Preload avatar pose sequence in memory to speed up random pose; only useful if using synthetic data input")
         ("images,i", po::value<int>(&num_images)->default_value(100), "Number of random images to train on; Kinect used 1 million")
         ("intrin_path", po::value<std::string>(&intrin_path)->default_value(""), "Path to camera intrinsics file (default: uses hardcoded K4A intrinsics)")
         ("pixels,p", po::value<int>(&num_points_per_image)->default_value(2000), "Number of random pixels from each image; Kinect used 2000")
@@ -38,17 +37,17 @@ int main(int argc, char** argv) {
         ("probe,b", po::value<int>(&max_probe_offset)->default_value(170), "Maximum probe offset for random feature generation. "
                             "Noted in Kinect paper that cost 'levels off around >=129' but hyperparameter value not provided")
         ("min_samples,m", po::value<int>(&min_samples)->default_value(1), "Minimum number of samples of a child to declare current node a leaf")
-        ("min_samples_per_feature", po::value<int>(&min_samples_per_feature)->default_value(20),
-          "Minimum number of sparse samples to use in each node training step to quickly propose thresholds. If num_samples * frac_samples_per_feature < min_samples_per_feature then min_samples_per_feature samples are used.")
+        ("thresholds,T", po::value<int>(&min_samples_per_feature)->default_value(20),
+          "Number of thresholds to use in each node training step to quickly propose thresholds. If num_samples * frac_samples_per_feature < min_samples_per_feature then min_samples_per_feature samples are used.")
         ("frac_samples_per_feature", po::value<float>(&frac_samples_per_feature)->default_value(0.001f),
-          "Proportion of samples to use in each node training step to sparsely propose thresholds.")
+          "(Deprecated) Proportion of samples to use in each node training step to sparsely propose thresholds.")
         ("threshes_per_feature", po::value<int>(&threshes_per_feature)->default_value(15),
-          "Maximum number of candidates thresholds to optimize over for each feature (different from Kinect)")
+          "(Deprecated) Maximum number of candidates thresholds to optimize over for each feature (different from Kinect)")
         ("depth,d", po::value<int>(&max_tree_depth)->default_value(20), "Maximum tree depth; Kinect used 20")
         ("width", po::value<int>(&size.width)->default_value(1280), "Width of generated images; only useful if using synthetic data input")
         ("height", po::value<int>(&size.height)->default_value(720), "Height of generated imaes; only useful if using synthetic data input")
         ("cache_size,c", po::value<int>(&cache_size)->default_value(50), "Max number of images in cache during training")
-        ("resume,s", po::value<std::string>(&resume_file)->default_value(""), "Training save state file (previously known as 'samples' file, now more general).")
+        ("resume,s", po::value<std::string>(&resume_file)->default_value(""), "Training save state file, used to save checkpoints. Training with same file later will resume from savepoint. (previously known as 'samples' file, now more general).")
         ("memory,M", po::value<int>(&mem_limit_mb)->default_value(12000), "Maximum training memory (for counting part; actual usage may be 2x) in MB.")
     ;
 

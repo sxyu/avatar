@@ -3,6 +3,7 @@
 #include <fstream>
 #include <chrono>
 #include <cstdio>
+#include <csignal>
 #include <random>
 #include <atomic>
 #include <deque>
@@ -188,6 +189,8 @@ namespace ark {
                 size_t r = random_util::randint<size_t>(i, poseSequence.numFrames - 1);
                 if (r != i) std::swap(seq[r], seq[i]);
             }
+            seq.resize(num_images);
+            xorKey = random_util::randint<uint32_t>(1, std::numeric_limits<uint32_t>::max());
         }
 
         int size() const {
@@ -204,12 +207,12 @@ namespace ark {
                 last_hint = hint;
                 if (poseSequence.numFrames) {
                     // random_util::randint<size_t>(0, poseSequence.numFrames - 1)
-                    int seqid = seq[idx % poseSequence.numFrames];
+                    int seqid = seq[idx % seq.size()];
                     poseSequence.poseAvatar(ava, seqid);
                     ava.r[0].setIdentity();
-                    ava.randomize(false, true, true, idx);
+                    ava.randomize(false, true, true, static_cast<uint32_t>(idx) ^ xorKey);
                 } else {
-                    ava.randomize(true, true, true, idx);
+                    ava.randomize(true, true, true, static_cast<uint32_t>(idx) ^ xorKey);
                 }
                 ava.update();
                 AvatarRenderer renderer(ava, intrin);
@@ -227,12 +230,12 @@ namespace ark {
             thread_local Avatar ava(avaModel);
             if (poseSequence.numFrames) {
                 // random_util::randint<size_t>(0, poseSequence.numFrames - 1)
-                int seqid = seq[idx % poseSequence.numFrames];
+                int seqid = seq[idx % seq.size()];
                 poseSequence.poseAvatar(ava, seqid);
                 ava.r[0].setIdentity();
-                ava.randomize(false, true, true, idx);
+                ava.randomize(false, true, true, static_cast<uint32_t>(idx) ^ xorKey);
             } else {
-                ava.randomize(true, true, true, idx);
+                ava.randomize(true, true, true, static_cast<uint32_t>(idx) ^ xorKey);
             }
             ava.update();
             AvatarRenderer renderer(ava, intrin);
@@ -244,6 +247,8 @@ namespace ark {
         // Warning: serialization is incomplete, still need to load same avatar model, pose sequence, etc.
         void serialize(std::ostream& os) {
             os.write("SRC_AVATAR", 10);
+            util::write_bin<size_t>(os, std::numeric_limits<size_t>::max());
+            util::write_bin<uint32_t>(os, xorKey);
             util::write_bin(os, seq.size());
             for (int i : seq) {
                 util::write_bin(os, i);
@@ -257,19 +262,30 @@ namespace ark {
                 std::cerr << "ERROR: Invalid avatar data source specified in stored samples file\n";
                 return;
             }
+            size_t sz;
+            util::read_bin<size_t>(is, sz);
+            if (sz == std::numeric_limits<size_t>::max()) {
+                // New format with xor key
+                util::read_bin<uint32_t>(is, xorKey);
+                util::read_bin(is, sz);
+            } else {
+                // For compatibility
+                xorKey = 0;
+            }
 
             seq.clear();
-            size_t sz;
-            util::read_bin(is, sz);
             seq.reserve(sz);
             int x;
             for (size_t i = 0; i < sz; ++i) {
                 util::read_bin(is, x);
                 seq.push_back(x);
             }
+            if (seq.size() > numImages) {
+                seq.resize(numImages);
+            }
         }
 
-        int numImages;
+        int numImages; uint32_t xorKey;
         cv::Size imageSize;
         AvatarModel& avaModel;
         AvatarPoseSequence& poseSequence;
@@ -505,7 +521,9 @@ namespace ark {
                 if (depth <= 1 || end - start <= static_cast<size_t>(minSamples)) {
                     node.leafid = static_cast<int>(leafData.size());
                     if (verbose) {
-                        std::cout << "Added leaf node: id=" << node.leafid << "\n";
+                        if (node.leafid % 500 == 0) {
+                            std::cout << "Added leaf node: id=" << node.leafid << "\n";
+                        }
                     }
                     leafData.emplace_back();
                     leafData.back().resize(numParts);
@@ -1027,7 +1045,7 @@ namespace ark {
                 }
             }
             if(verbose) {
-                std::cerr << "Result: data is valid\n";
+                std::cerr << "Result: data is valid\n" << std::flush;
             }
         }
 
@@ -2094,8 +2112,17 @@ namespace ark {
                 AvatarDataSource& data_source,
                 int num_parts)
             : nodes(nodes), leafData(leaf_data),
-              dataSource(data_source), numParts(num_parts) {
-            }
+              dataSource(data_source), numParts(num_parts) { }
+
+        /** Information gain computation state
+         *  (one copy per thread) to save reallocations */
+        struct IGTrainState3 {
+            IGTrainState3(int numParts, int numThreshes) :
+                distLeft(numParts), distRight(numParts),
+                buckets(numParts, numThreshes) {}
+            RTree::Distribution distLeft, distRight;
+            Eigen::MatrixXf buckets;
+        };
 
         void train(int num_images, int num_points_per_image, int num_features,
                    int max_probe_offset, int min_samples, int min_samples_per_feature,
@@ -2137,6 +2164,7 @@ namespace ark {
             std::cout << "RTree v3 training finished (▀̿Ĺ̯▀̿ ̿)\n" << std::flush;
         }
 
+        volatile bool panicMode = false;
     private:
         /** Initialization helper */
         void initTraining(int num_images, int num_points_per_image, int max_tree_depth, int num_threads, bool verbose) {
@@ -2225,7 +2253,9 @@ namespace ark {
                 // Leaf
                 node.leafid = static_cast<int>(leafData.size());
                 if (verbose) {
-                    std::cout << "Added leaf node: id=" << node.leafid << "\n";
+                    if (node.leafid % 500 == 0) {
+                        std::cout << "Added leaf node: id=" << node.leafid << "\n";
+                    }
                 }
                 leafData.emplace_back(numParts);
                 leafData.back().setZero();
@@ -2245,10 +2275,14 @@ namespace ark {
                     ". Current data interval: " << start << " to " << end << "\n";
                if (depth > 6) std::cout << std::flush;
             }
-            if (savePath.size() && depth == 15) {
+            if (savePath.size() && (depth == 15 || panicMode)) {
                 std::cout << "Saving to " << savePath << "\n" << std::flush;
                 writeSamples(savePath);
-                std::cout << "Saving complete, computing optimal feature\n" << std::flush;
+                std::cout << "Save complete\n" << std::flush;
+            }
+            if (panicMode) {
+                std::cout << "PANIC: Termination procedure complete\n" << std::flush;
+                std::exit(0);
             }
 
             int mid;
@@ -2262,6 +2296,8 @@ namespace ark {
                 std::atomic<int> featureCount(numFeatures);
                 // Mapreduce-ish
                 auto worker = [&](int thread_id) {
+                    // Thread-specific training data
+                    IGTrainState3 trainState(numParts, minSamplesPerFeature /*misnomer*/);
                     float& bestInfoGain = bestInfoGains(thread_id);
                     float& bestThresh = bestThreshs(thread_id);
                     float optimalThresh;
@@ -2271,10 +2307,14 @@ namespace ark {
                     while (true) {
                         threadFeatId = featureCount--;
                         if (threadFeatId <= 0) break;
-                        if (end-start > 10000 && threadFeatId % 500 == 0) {
-                            std::cout << threadFeatId << " features remain\n";
-                            if (threadFeatId % 100000 == 0)
-                                std::cout << std::flush;
+                        if (end-start > 500000 && depth > 4) {
+                            if (threadFeatId % 500 == 0 ||
+                                (end-start > 10000000 &&
+                                 (threadFeatId % 100 == 0
+                                 || (end-start > 200000000
+                                     && threadFeatId % 10 == 0)))) {
+                                std::cout << threadFeatId << " features remain\n" << std::flush;
+                            }
                         }
 
                         // Create random feature in-place
@@ -2283,13 +2323,15 @@ namespace ark {
                         feature.v.x() = random_util::uniform(0.5, maxProbeOffset) * (random_util::randint(0, 2) * 2 - 1);
                         feature.v.y() = random_util::uniform(0.5, maxProbeOffset) * (random_util::randint(0, 2) * 2 - 1);
 
-                        float infoGain = optimalInformationGain3(start, end, feature, &optimalThresh);
+                        float infoGain = optimalInformationGain3(trainState,
+                                start, end, feature, &optimalThresh);
 
                         if (infoGain >= bestInfoGain) {
                             bestInfoGain = infoGain;
                             bestThresh = optimalThresh;
                             bestFeature = feature;
                         }
+                        if (panicMode) break;
                     }
                 };
 
@@ -2305,8 +2347,17 @@ namespace ark {
                         bestThreadId = i;
                     }
                 }
+                if (panicMode) {
+                    trainFromNode(node_id, depth);
+                    return;
+                }
 
                 mid = split(start, end, bestFeatures[bestThreadId], bestThreshs(bestThreadId));
+
+                if (panicMode) {
+                    trainFromNode(node_id, depth);
+                    return;
+                }
 
                 bestInfoGain = bestInfoGains(bestThreadId);
                 if (depth > 5) {
@@ -2474,51 +2525,60 @@ namespace ark {
         }
 
         // Compute information gain (mutual information scaled and shifted) by choosing optimal threshold
-        float optimalInformationGain3(size_t start, size_t end, const Feature& feature, float* optimal_thresh) {
+        float optimalInformationGain3(IGTrainState3& state, size_t start, size_t end, const Feature& feature, float* optimal_thresh) {
 
             // Initially everything is in left set
-            RTree::Distribution distLeft(numParts), distRight(numParts);
-            distLeft.setZero();
-            distRight.setZero();
+            state.buckets.setZero();
+            state.distLeft.setZero();
+            state.distRight.setZero();
 
             // Compute scores
-            std::vector<std::pair<float, int> > samplesByScore;
-
-            size_t tstep;
-            if (end - start > 100000000) tstep = 4;
-            else if (end - start > 10000000) tstep = 2;
-            else tstep = 1;
-            for (size_t i = start; i < end; i += tstep) {
+            // std::vector<std::pair<float, int> > samplesByScore;
+            float minScore = std::numeric_limits<float>::max();
+            float maxScore = std::numeric_limits<float>::lowest();
+            for (size_t i = start; i < end; ++i) {
                 const Sample3& sample = samples[i];
-                samplesByScore.emplace_back(
-                        scoreByFeature(data[sample.index],
-                            sample.pix, feature.u, feature.v) , i);
-                distLeft[sample.label] += 1.f;
+                float score = scoreByFeature(data[sample.index],
+                            sample.pix, feature.u, feature.v);
+                minScore = std::min(score, minScore);
+                maxScore = std::max(score, maxScore);
+                // samplesByScore.emplace_back(
+                        // , i);
+                state.distLeft[sample.label] += 1.f;
             }
-            static auto scoreComp = [](const std::pair<float, int> & a, const std::pair<float, int> & b) {
-                return a.first < b.first;
-            };
-            std::sort(samplesByScore.begin(), samplesByScore.end(), scoreComp);
+
+            if (panicMode || minScore > maxScore) return std::numeric_limits<float>::lowest();
+
+            float scoreStep = (maxScore - minScore + std::numeric_limits<float>::epsilon()) / (minSamplesPerFeature + 1.f);
+
+            // Counts per part for each threshold bucket
+            for (size_t i = start; i < end; ++i) {
+                const Sample3& sample = samples[i];
+                float score = scoreByFeature(data[sample.index],
+                            sample.pix, feature.u, feature.v);
+                size_t buckId = static_cast<size_t>((score - minScore) / scoreStep);
+                if (buckId < minSamplesPerFeature) {
+                    state.buckets(sample.label, buckId) += 1.f;
+                }
+            }
+
+            if (panicMode) return std::numeric_limits<float>::lowest();
 
             // Start everything in the left set ...
-            float bestInfoGain = -FLT_MAX;
-            *optimal_thresh = samplesByScore[0].first;
-            size_t step = std::max<size_t>(samplesByScore.size() / minSamplesPerFeature, 1);
-            float lastScore = -FLT_MAX;
-            for (size_t i = 0; i < samplesByScore.size()-1; ++i) {
+            float bestInfoGain = std::numeric_limits<float>::lowest();
+            *optimal_thresh = minScore;
+            for (size_t i = 0; i < minSamplesPerFeature; ++i) {
                 // Update distributions for left, right sets
-                const Sample3& sample = samples[samplesByScore[i].second];
-                distLeft[sample.label] -= 1.f;
-                distRight[sample.label] += 1.f;
-                if (i%step != 0 || lastScore == samplesByScore[i].first)
-                    continue;
-                lastScore = samplesByScore[i].first;
+                state.distLeft.noalias() -= state.buckets.col(i);
+                state.distRight.noalias() += state.buckets.col(i);
 
-                float left_entropy = entropy(distLeft / distLeft.sum());
-                float right_entropy = entropy(distRight / distRight.sum());
+                float leftSum = state.distLeft.sum(),
+                      rightSum = state.distRight.sum();
+                float left_entropy = entropy(state.distLeft / leftSum);
+                float right_entropy = entropy(state.distRight / rightSum);
                 // Compute the information gain
-                float infoGain = - ((samplesByScore.size() - i - 1) * left_entropy
-                                 + (i+1)                 * right_entropy);
+                float infoGain = - (  leftSum * left_entropy
+                                    + rightSum * right_entropy);
                 if (infoGain > 0) {
                     std::cerr << "FATAL ERROR: Possibly overflow detected during training, exiting. Internal data: left entropy "
                         << left_entropy << " right entropy "
@@ -2528,7 +2588,7 @@ namespace ark {
                 }
                 if (infoGain > bestInfoGain) {
                     // If better then update optimal thresh to between samples
-                    *optimal_thresh = random_util::uniform(samplesByScore[i].first, samplesByScore[i+1].first);
+                    *optimal_thresh = minScore + (i + 1) * scoreStep;
                     bestInfoGain = infoGain;
                 }
             }
@@ -2633,6 +2693,16 @@ namespace ark {
         const int IMREAD_FLAGS[2] = { cv::IMREAD_ANYCOLOR | cv::IMREAD_ANYDEPTH, cv::IMREAD_GRAYSCALE };
     };
 
+    // UGLY SIGINT handling
+    AvatarTrainerV3* currentTrainer = nullptr;
+    void sigHandler(int signal){
+        if (currentTrainer != nullptr) {
+            std::cout << "PANIC: RTree: received SIGINT, entering panic mode (tries to halt and save)\n" << std::flush;
+            currentTrainer->panicMode = true;
+        }
+    }
+
+    // RTree implementation
     RTree::RTree(int num_parts) : numParts(num_parts) {}
     RTree::RTree(const std::string & path) {
         if (!loadFile(path)) {
@@ -2800,9 +2870,13 @@ namespace ark {
                 // max_probe_offset, min_samples, max_tree_depth, min_samples_per_feature, frac_samples_per_feature,
                 // threshes_per_feature, num_threads, train_partial_save_path, mem_limit_mb, verbose);
         AvatarTrainerV3 trainer(nodes, leafData, dataSource, numParts);
+        // Ugly way to save when we get SIGINT
+        currentTrainer = &trainer;
+        signal(SIGINT, sigHandler);
         trainer.train(num_images, num_points_per_image, num_features,
                    max_probe_offset, min_samples, min_samples_per_feature,
                    max_tree_depth, num_threads,
                    train_partial_save_path, verbose);
+        currentTrainer = nullptr;
     }
 }
