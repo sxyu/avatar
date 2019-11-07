@@ -38,12 +38,12 @@ namespace {
     // Get depth at point in depth image, or return BACKGROUND_DEPTH
     // if in the background OR out of bounds
     template<class Image>
-    inline float getDepth(const Image& depth_image, const ark::RTree::Vec2i& point) {
+    inline float getDepth(const Image& depth_image, const Eigen::Vector2i& point) {
         if (point.y() < 0 || point.x() < 0 ||
                 point.y() >= depth_image.rows || point.x() >= depth_image.cols)
             return ark::RTree::BACKGROUND_DEPTH;
         float depth = depth_image.template at<float>(point.y(), point.x());
-        if (depth <= 0.0) return ark::RTree::BACKGROUND_DEPTH;
+        if (depth == 0.0) return ark::RTree::BACKGROUND_DEPTH;
         return depth;
     }
 
@@ -55,13 +55,13 @@ namespace {
             const ark::RTree::Vec2& v) {
             float sampleDepth = depth_image.template at<float>(pix.y(), pix.x());
             // Add feature u,v and round
-            // Eigen::Vector2f ut = u / sampleDepth, vt = v / sampleDepth;
-            ark::RTree::Vec2i uti, vti;
-            uti[0] = static_cast<int16_t>(std::round(u.x() / sampleDepth));
-            uti[1] = static_cast<int16_t>(std::round(u.y() / sampleDepth));
-            vti[0] = static_cast<int16_t>(std::round(v.x() / sampleDepth));
-            vti[1] = static_cast<int16_t>(std::round(v.y() / sampleDepth));
-            uti += pix; vti += pix;
+            Eigen::Vector2f ut = u / sampleDepth, vt = v / sampleDepth;
+            Eigen::Vector2i uti, vti;
+            uti[0] = static_cast<int32_t>(std::round(ut.x()));
+            uti[1] = static_cast<int32_t>(std::round(ut.y()));
+            vti[0] = static_cast<int32_t>(std::round(vt.x()));
+            vti[1] = static_cast<int32_t>(std::round(vt.y()));
+            uti += pix.cast<int32_t>(); vti += pix.cast<int32_t>();
 
             return (getDepth(depth_image, uti) - getDepth(depth_image, vti));
         }

@@ -298,6 +298,74 @@ void __avatarGUI()
 //         else if (k == 'n') controlsChanged = true;
 //     }
 // }
+// Get depth at point in depth image, or return BACKGROUND_DEPTH
+
+namespace {
+typedef Eigen::Vector2f Vec2;
+// NOTE: ASSUMING width/height <= 32767
+typedef Eigen::Matrix<int16_t, 2, 1> Vec2i;
+
+float BACKGROUND_DEPTH = 20.0f;
+
+// if in the background OR out of bounds
+template<class Image>
+inline float getDepth(const Image& depth_image, const Eigen::Vector2i& point) {
+    if (point.y() < 0 || point.x() < 0 ||
+            point.y() >= depth_image.rows || point.x() >= depth_image.cols)
+        return BACKGROUND_DEPTH;
+    float depth = depth_image.template at<float>(point.y(), point.x());
+    if (depth == 0.0f) return BACKGROUND_DEPTH;
+    return depth;
+}
+
+/** Get score of single sample given by a feature */
+template <class Image>
+inline float scoreByFeature(const Image& depth_image,
+        const Vec2i& pix,
+        const Vec2& u,
+        const Vec2& v) {
+    float sampleDepth = depth_image.template at<float>(pix.y(), pix.x());
+    // Add feature u,v and round
+    Eigen::Vector2f ut = u / sampleDepth, vt = v / sampleDepth;
+    Eigen::Vector2i uti, vti;
+    uti[0] = static_cast<int32_t>(std::round(ut.x()));
+    uti[1] = static_cast<int32_t>(std::round(ut.y()));
+    vti[0] = static_cast<int32_t>(std::round(vt.x()));
+    vti[1] = static_cast<int32_t>(std::round(vt.y()));
+    uti += pix.cast<int32_t>(); vti += pix.cast<int32_t>();
+
+    return (getDepth(depth_image, uti) - getDepth(depth_image, vti));
+}
+
+template <class Image>
+inline float scoreByFeature2(const Image& depth_image,
+        const Vec2i& pix,
+        const Vec2& u,
+        const Vec2& v) {
+    float sampleDepth = depth_image.template at<float>(pix.y(), pix.x());
+    // Add feature u,v and round
+    // Eigen::Vector2f ut = u / sampleDepth, vt = v / sampleDepth;
+    const int16_t upx = static_cast<int16_t>(std::round(u.x() / sampleDepth)) + pix.x();
+    const int16_t upy = static_cast<int16_t>(std::round(u.y() / sampleDepth)) + pix.y();
+    const int16_t vpx = static_cast<int16_t>(std::round(v.x() / sampleDepth)) + pix.x();
+    const int16_t vpy = static_cast<int16_t>(std::round(v.y() / sampleDepth)) + pix.y();
+    float udepth, vdepth;
+    if (upx < 0 || upy < 0 || upx >= depth_image.cols || upy >= depth_image.rows) {
+        udepth = BACKGROUND_DEPTH;
+    } else {
+        udepth = depth_image.template at<float>(upy, upx);
+        if (udepth == 0.0f) udepth = BACKGROUND_DEPTH;
+    }
+    if (vpx < 0 || vpy < 0 || vpx >= depth_image.cols || vpy >= depth_image.rows) {
+        vdepth = BACKGROUND_DEPTH;
+    } else {
+        vdepth = depth_image.template at<float>(upy, upx);
+        if (vdepth == 0.0f) vdepth = BACKGROUND_DEPTH;
+    }
+
+    return udepth - vdepth;
+}
+}
 
 int main(int argc, char** argv) {
     // __avatarGUI();
@@ -309,32 +377,45 @@ int main(int argc, char** argv) {
     intrin.fy = 606.351;
     intrin.cx = 637.294;
     intrin.cy = 366.992;
-    BEGIN_PROFILE;
     ark::Avatar ava(model);
-    PROFILE(Load);
     ava.randomize();
-    PROFILE(Random);
     ava.update();
-    PROFILE(Update);
     ark::AvatarRenderer renderer(ava, intrin);
     cv::Size size(1280, 720);
-    PROFILE(Prep);
-    
+
+    int maxProbeOffset = 170;
+    Vec2 u, v;
+
     cv::Mat m = renderer.renderDepth(size);
-    PROFILE(RENDER_DEPTH);
-    cout << m.step[0] * m.rows << "\n";
     ark::SparseImage spm(m);
-    cout << "memory new: " << spm.data.size() * sizeof(float) + spm.starts.size() * sizeof(int) << "\n";
-    PROFILE(CONVERT);
-    cv::Mat rest = spm.toMat();
-    PROFILE(CONVERTBack);
-    
-    cv::Mat m2 = renderer.renderPartMask(size);
-    PROFILE(RENDER_PART_MASK);
-    cv::imshow("render", m);
-    cv::imwrite("rend_rest.exr", rest);
-    cv::waitKey(0);
-    cv::imshow("render", m2);
-    cv::waitKey(0);
+
+    Vec2i pix;
+    u.x() = ark::random_util::uniform(0.5, maxProbeOffset) * (ark::random_util::randint(0, 2) * 2 - 1);
+    u.y() = ark::random_util::uniform(0.5, maxProbeOffset) * (ark::random_util::randint(0, 2) * 2 - 1);
+    v.x() = ark::random_util::uniform(0.5, maxProbeOffset) * (ark::random_util::randint(0, 2) * 2 - 1);
+    v.y() = ark::random_util::uniform(0.5, maxProbeOffset) * (ark::random_util::randint(0, 2) * 2 - 1);
+    float avg = 0.0;
+    BEGIN_PROFILE;
+    for (int t = 0; t < 100; ++t) {
+        for (int i = 0; i < spm.rows; ++i) {
+            pix.y() = i;
+            for (int j = 0; j < spm.rows; ++j) {
+                pix.x() = j;
+                avg += scoreByFeature(spm, pix, u, v);
+            }
+        }
+    }
+    PROFILE(ScoreByFeature);
+    for (int t = 0; t < 100; ++t) {
+        for (int i = 0; i < spm.rows; ++i) {
+            pix.y() = i;
+            for (int j = 0; j < spm.rows; ++j) {
+                pix.x() = j;
+                avg += scoreByFeature2(spm, pix, u, v);
+            }
+        }
+    }
+    PROFILE(ScoreByFeature2);
+    cout << avg << "\n";
     return 0;
 }
