@@ -130,7 +130,7 @@ int main(int argc, char** argv) {
         }
 
         if (rtreePath.size()) {
-            cv::Mat result = rtree.predictBest(depth);
+            cv::Mat result = rtree.predictBest(depth, std::thread::hardware_concurrency());
             cv::Mat visual = cv::Mat::zeros(depth.size(), CV_8UC3);
             for (int r = 0; r < depth.rows; ++r) {
                 auto* inPtr = result.ptr<uint8_t>(r);

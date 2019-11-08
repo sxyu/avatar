@@ -2917,20 +2917,31 @@ namespace ark {
         return result;
     }
 
-    cv::Mat RTree::predictBest(const cv::Mat& depth) {
+    cv::Mat RTree::predictBest(const cv::Mat& depth, int num_threads) {
         cv::Mat result(depth.size(), CV_8U);
         result.setTo(255);
-        Vec2i pix;
-        uint8_t* ptr;
-        for (int r = 0; r < depth.rows; ++r) {
-            pix(1) = r;
-            ptr = result.ptr<uint8_t>(r);
-            const auto* inPtr = depth.ptr<float>(r);
-            for (int c = 0; c < depth.cols; ++c) {
-                if (inPtr[c] <= 0.f) continue;
-                pix(0) = c;
-                ptr[c] = predictRecursiveBest(0, depth, pix);
+        auto worker = [&](int start_row, int end_row) {
+            Vec2i pix;
+            uint8_t* ptr;
+            for (int r = start_row; r < end_row; ++r) {
+                pix(1) = r;
+                ptr = result.ptr<uint8_t>(r);
+                const auto* inPtr = depth.ptr<float>(r);
+                for (int c = 0; c < depth.cols; ++c) {
+                    if (inPtr[c] == 0.f) continue;
+                    pix(0) = c;
+                    ptr[c] = predictRecursiveBest(0, depth, pix);
+                }
             }
+        };
+        int step = depth.rows / num_threads;
+        std::vector<std::thread> threadMgr;
+        for (int i = 0; i < num_threads - 1; ++i) {
+            threadMgr.emplace_back(worker, step * i, step * (i + 1));
+        }
+        threadMgr.emplace_back(worker, step * (num_threads - 1), depth.rows);
+        for (int i = 0; i < num_threads; ++i) {
+            threadMgr[i].join();
         }
         return result;
     }
