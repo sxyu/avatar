@@ -11,12 +11,14 @@
 
 #include "BGSubtractor.h"
 #include "Calibration.h"
+#include "RTree.h"
 #include "Util.h"
 
 int main(int argc, char** argv) {
     namespace po = boost::program_options;
     std::string datasetPath;
     int bgId, imId, padSize;
+    std::string rtreePath;
 
     po::options_description desc("Option arguments");
     po::options_description descPositional("OpenARK Basic Background Subtraction Visualization v0.1b (c) Alex Yu 2019\nPosition arguments");
@@ -26,6 +28,7 @@ int main(int argc, char** argv) {
         ("background,b", po::value<int>(&bgId)->default_value(0), "Background image id")
         ("image,i", po::value<int>(&imId)->default_value(1), "Current image id")
         ("pad,p", po::value<int>(&padSize)->default_value(4), "Zero pad width for image names in this dataset")
+        ("rtree,r", po::value<std::string>(&rtreePath)->default_value(""), "RTree model path")
     ;
     descPositional.add_options()
         ("dataset_path", po::value<std::string>(&datasetPath)->required(), "Input dataset root directory, should contain depth_exr etc")
@@ -81,6 +84,9 @@ int main(int argc, char** argv) {
     ark::BGSubtractor bgsub(background);
     std::vector<std::array<int, 2> > compsBySize;
 
+    ark::RTree rtree(0);
+    if (rtreePath.size()) rtree.loadFile(rtreePath);
+
     while (true) {
         // std::cerr << imId << " LOAD\n";
         std::stringstream ss_img_id;
@@ -94,6 +100,7 @@ int main(int argc, char** argv) {
             std::cerr << "WARNING: no more images found, exiting\n";
             break;
         }
+        cv::Mat depth = image;
         if (image.channels() == 1) image = intrin.depthToXYZ(image);
         cv::Mat sub = bgsub.run(image, &compsBySize);
 
@@ -105,10 +112,12 @@ int main(int argc, char** argv) {
         for (int r = 0 ; r < image.rows; ++r) {
             auto* outptr = vis.ptr<cv::Vec3b>(r);
             const auto* inptr = sub.ptr<uint8_t>(r);
+            auto* dptr = depth.ptr<float>(r);
             for (int c = 0 ; c < image.cols; ++c) {
                 int colorIdx = colorid[inptr[c]];
                 if (colorIdx >= 254) outptr[c] = 0;
                 else outptr[c] = ark::util::paletteColor(colorIdx, true);
+                if(colorIdx != 0) dptr[c] = 0.0f;
             }
         }
 
@@ -119,7 +128,22 @@ int main(int argc, char** argv) {
                 outptr[c] = rgbptr[c] / 3 + (outptr[c] - rgbptr[c]) / 3 * 2;
             }
         }
-        cv::imshow("Visual", vis);
+
+        if (rtreePath.size()) {
+            cv::Mat result = rtree.predictBest(depth);
+            cv::Mat visual = cv::Mat::zeros(depth.size(), CV_8UC3);
+            for (int r = 0; r < depth.rows; ++r) {
+                auto* inPtr = result.ptr<uint8_t>(r);
+                auto* visualPtr = visual.ptr<cv::Vec3b>(r);
+                for (int c = 0; c < depth.cols; ++c){
+                    if (inPtr[c] == 255) continue;
+                    visualPtr[c] = ark::util::paletteColor(inPtr[c], true);
+                }
+            }
+            cv::imshow("Visual", visual);
+        } else {
+            cv::imshow("Visual", vis);
+        }
         ++imId;
         int k = cv::waitKey(1);
         if (k == 'q') break;

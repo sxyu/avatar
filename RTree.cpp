@@ -2792,6 +2792,7 @@ namespace ark {
             }
         }
 
+        updateBestMatchTable();
         return true;
     }
 
@@ -2867,8 +2868,25 @@ namespace ark {
          }
      }
 
+     uint8_t RTree::predictRecursiveBest(int nodeid, const cv::Mat& depth, const Vec2i& pix) {
+         auto& node = nodes[nodeid];
+         if (node.leafid == -1) {
+             if (scoreByFeature(depth, pix, node.u, node.v) < node.thresh) {
+                 return predictRecursiveBest(node.lnode, depth, pix);
+             } else {
+                 return predictRecursiveBest(node.rnode, depth, pix);
+             }
+         } else {
+             return leafBestMatch[node.leafid];
+         }
+     }
+
     RTree::Distribution RTree::predict(const cv::Mat& depth, const Vec2i& pix) {
         return predictRecursive(0, depth, pix);
+    }
+
+    uint8_t RTree::predictBest(const cv::Mat& depth, const Vec2i& pix) {
+        return predictRecursiveBest(0, depth, pix);
     }
 
     std::vector<cv::Mat> RTree::predict(const cv::Mat& depth) {
@@ -2899,6 +2917,24 @@ namespace ark {
         return result;
     }
 
+    cv::Mat RTree::predictBest(const cv::Mat& depth) {
+        cv::Mat result(depth.size(), CV_8U);
+        result.setTo(255);
+        Vec2i pix;
+        uint8_t* ptr;
+        for (int r = 0; r < depth.rows; ++r) {
+            pix(1) = r;
+            ptr = result.ptr<uint8_t>(r);
+            const auto* inPtr = depth.ptr<float>(r);
+            for (int c = 0; c < depth.cols; ++c) {
+                if (inPtr[c] <= 0.f) continue;
+                pix(0) = c;
+                ptr[c] = predictRecursiveBest(0, depth, pix);
+            }
+        }
+        return result;
+    }
+
     void RTree::train(const std::string& depth_dir,
                    const std::string& part_mask_dir,
                    int num_threads,
@@ -2924,6 +2960,7 @@ namespace ark {
                 num_features_filtered,
                 max_probe_offset, min_samples, max_tree_depth, min_samples_per_feature, frac_samples_per_feature, threshes_per_feature,
                 num_threads, train_partial_save_path, mem_limit_mb, verbose);
+        updateBestMatchTable();
     }
 
     void RTree::trainFromAvatar(AvatarModel& avatar_model,
@@ -2962,5 +2999,19 @@ namespace ark {
                    max_tree_depth, num_threads,
                    train_partial_save_path, verbose);
         currentTrainer = nullptr;
+        updateBestMatchTable();
+    }
+
+    void RTree::updateBestMatchTable() {
+        leafBestMatch.resize(leafData.size());
+        for (size_t i = 0; i < leafData.size(); ++i) {
+            float best = std::numeric_limits<float>::lowest();
+            for (int j = 0; j < numParts; ++j) {
+                if (leafData[i](j) > best) {
+                    best = leafData[i](j);
+                    leafBestMatch[i] = j;
+                }
+            }
+        }
     }
 }

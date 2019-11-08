@@ -55,9 +55,17 @@ namespace ark {
          *  Do not call unless model has been trained or loaded */
         Distribution predict(const cv::Mat& depth, const Vec2i& pix);
 
+        /** Predict best match for a sample.
+         *  Do not call unless model has been trained or loaded */
+        uint8_t predictBest(const cv::Mat& depth, const Vec2i& pix);
+
         /** Predict distribution for all of image. Returns vector of CV_32F Mat 
          *  Do not call unless model has been trained or loaded */
         std::vector<cv::Mat> predict(const cv::Mat& depth);
+
+        /** Predict best match for each pixel in image. Returns CV_8U Mat 
+         *  Do not call unless model has been trained or loaded */
+        cv::Mat predictBest(const cv::Mat& depth);
 
         /** Train from images and part-masks in OpenARK DataSet format,
          *  with num_images random images and num_points_per_image random pixels
@@ -113,9 +121,13 @@ namespace ark {
 
         std::vector<RNode, Eigen::aligned_allocator<RNode> > nodes;
         std::vector<Distribution> leafData;
+        std::vector<uint8_t> leafBestMatch;
         int numParts;
 
     private:
         Distribution predictRecursive(int nodeid, const cv::Mat& depth, const Vec2i& pix);
+        uint8_t predictRecursiveBest(int nodeid, const cv::Mat& depth, const Vec2i& pix);
+
+        void updateBestMatchTable();
     };
 }
