@@ -2711,31 +2711,84 @@ namespace ark {
     }
 
     bool RTree::loadFile(const std::string & path) {
-        size_t nNodes, nLeafs;
-        std::ifstream ifs(path);
-        if (!ifs) return false;
-
-        ifs >> nNodes >> nLeafs >> numParts;
-        nodes.resize(nNodes);
-        leafData.resize(nLeafs);
-
-        for (size_t i = 0; i < nNodes; ++i) {
-            ifs >> nodes[i].leafid;
-            if (nodes[i].leafid < 0) {
-                ifs >> nodes[i].lnode >>
-                       nodes[i].rnode >>
-                       nodes[i].thresh >>
-                       nodes[i].u[0] >>
-                       nodes[i].u[1] >>
-                       nodes[i].v[0] >>
-                       nodes[i].v[1];
+        std::ifstream bifs(path, std::ios::in | std::ios::binary);
+        char marker;
+        bifs.get(marker);
+        if (marker == 'R') {
+            // New binary format
+            uint32_t nNodes, nLeafs;
+            util::read_bin<uint32_t>(bifs, nNodes);
+            util::read_bin<uint32_t>(bifs, nLeafs);
+            util::read_bin<int32_t>(bifs, numParts);
+            nodes.resize(nNodes);
+            leafData.resize(nLeafs);
+            uint32_t lastLeafId = 0;
+            for (size_t i = 0; i < nodes.size(); ++i) {
+                uint8_t isLeaf;
+                util::read_bin<uint8_t>(bifs, isLeaf);
+                if (isLeaf) {
+                    leafData[lastLeafId].resize(numParts);
+                    leafData[lastLeafId].setZero();
+                    uint8_t cnt = 0;
+                    util::read_bin<uint8_t>(bifs, cnt);
+                    if (cnt > numParts) {
+                        std::cerr << "FATAL: leaf has " << int(cnt) << " parts, expected " << numParts << " at most\n";
+                        std::exit(1);
+                    }
+                    for (uint8_t j = 0; j < cnt; ++j) {
+                        uint8_t k;
+                        util::read_bin<uint8_t>(bifs, k);
+                        if (k > numParts) {
+                            std::cerr << "FATAL: leaf index " << int(k) << " is out of bounds, at most " << numParts << "\n";
+                            std::exit(1);
+                        }
+                        util::read_bin<float>(bifs, leafData[lastLeafId](k));
+                    }
+                    nodes[i].leafid = lastLeafId++;
+                } else {
+                    util::read_bin<int32_t>(bifs, nodes[i].lnode);
+                    util::read_bin<int32_t>(bifs, nodes[i].rnode);
+                    util::read_bin<float>(bifs, nodes[i].thresh);
+                    bifs.read(reinterpret_cast<char*>(nodes[i].u.data()), sizeof(float) * 2);
+                    bifs.read(reinterpret_cast<char*>(nodes[i].v.data()), sizeof(float) * 2);
+                }
             }
-        }
+            bifs.get(marker);
+            if (marker != 'T') {
+                std::cerr << "Error: incorrect RTree format, T end marker missing\n";
+                std::exit(1);
+            }
+            bifs.close();
+        } else {
+            std::cout << "Note: loading rtree stored in legacy text format\n" << std::flush;
+            // Legacy format
+            bifs.close();
+            size_t nNodes, nLeafs;
+            std::ifstream ifs(path);
+            if (!ifs) return false;
 
-        for (size_t i = 0; i < nLeafs; ++i) {
-            leafData[i].resize(numParts);
-            for (int j = 0 ; j < numParts; ++j){
-                ifs >> leafData[i](j);
+            ifs >> nNodes >> nLeafs >> numParts;
+            nodes.resize(nNodes);
+            leafData.resize(nLeafs);
+
+            for (size_t i = 0; i < nNodes; ++i) {
+                ifs >> nodes[i].leafid;
+                if (nodes[i].leafid < 0) {
+                    ifs >> nodes[i].lnode >>
+                        nodes[i].rnode >>
+                        nodes[i].thresh >>
+                        nodes[i].u[0] >>
+                        nodes[i].u[1] >>
+                        nodes[i].v[0] >>
+                        nodes[i].v[1];
+                }
+            }
+
+            for (size_t i = 0; i < nLeafs; ++i) {
+                leafData[i].resize(numParts);
+                for (int j = 0 ; j < numParts; ++j){
+                    ifs >> leafData[i](j);
+                }
             }
         }
 
@@ -2743,30 +2796,61 @@ namespace ark {
     }
 
     bool RTree::exportFile(const std::string & path) {
-        std::ofstream ofs(path);
-        ofs << std::fixed << std::setprecision(8);
-        ofs << nodes.size() << " " << leafData.size() << " " << numParts << "\n";
+        std::ofstream ofs(path, std::ios::out | std::ios::binary);
+        ofs.put('R');
+        util::write_bin<uint32_t>(ofs, nodes.size());
+        util::write_bin<uint32_t>(ofs, leafData.size());
+        util::write_bin<int32_t>(ofs, numParts);
         for (size_t i = 0; i < nodes.size(); ++i) {
-            ofs << " " << nodes[i].leafid;
+            util::write_bin<uint8_t>(ofs, (nodes[i].leafid < 0) ? uint8_t(0) : uint8_t(255));
             if (nodes[i].leafid < 0) {
-                ofs << "  " << nodes[i].lnode <<
-                    " " << nodes[i].rnode <<
-                    " " << nodes[i].thresh <<
-                    " " << nodes[i].u[0] <<
-                    " " << nodes[i].u[1] <<
-                    " " << nodes[i].v[0] <<
-                    " " << nodes[i].v[1];
+                util::write_bin<int32_t>(ofs, nodes[i].lnode);
+                util::write_bin<int32_t>(ofs, nodes[i].rnode);
+                util::write_bin<float>(ofs, nodes[i].thresh);
+                ofs.write(reinterpret_cast<char*>(nodes[i].u.data()), sizeof(float) * 2);
+                ofs.write(reinterpret_cast<char*>(nodes[i].v.data()), sizeof(float) * 2);
+            } else {
+                uint8_t cnt = 0;
+                for (int j = 0; j < numParts; ++j) {
+                    if (leafData[nodes[i].leafid](j) != 0.0) {
+                        ++cnt;
+                    }
+                }
+                util::write_bin<uint8_t>(ofs, cnt);
+                for (int j = 0; j < numParts; ++j) {
+                    if (leafData[nodes[i].leafid](j) != 0.0) {
+                        util::write_bin<uint8_t>(ofs, j);
+                        util::write_bin<float>(ofs, leafData[nodes[i].leafid](j));
+                    }
+                }
             }
-            ofs << "\n";
         }
-        for (size_t i = 0; i < leafData.size(); ++i) {
-            ofs << " ";
-            for (int j = 0 ; j < numParts; ++j){
-                ofs << leafData[i](j) << " ";
-            }
-            ofs << "\n";
-        }
+        ofs.put('T');
         ofs.close();
+        // Note: below code is for writing legacy format, disabled
+        // ofs << std::fixed << std::setprecision(8);
+        // ofs << nodes.size() << " " << leafData.size() << " " << numParts << "\n";
+        // for (size_t i = 0; i < nodes.size(); ++i) {
+        //     ofs << " " << nodes[i].leafid;
+        //     if (nodes[i].leafid < 0) {
+        //         ofs << "  " << nodes[i].lnode <<
+        //             " " << nodes[i].rnode <<
+        //             " " << nodes[i].thresh <<
+        //             " " << nodes[i].u[0] <<
+        //             " " << nodes[i].u[1] <<
+        //             " " << nodes[i].v[0] <<
+        //             " " << nodes[i].v[1];
+        //     }
+        //     ofs << "\n";
+        // }
+        // for (size_t i = 0; i < leafData.size(); ++i) {
+        //     ofs << " ";
+        //     for (int j = 0 ; j < numParts; ++j){
+        //         ofs << leafData[i](j) << " ";
+        //     }
+        //     ofs << "\n";
+        // }
+        // ofs.close();
         return true;
     }
 
