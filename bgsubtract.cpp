@@ -115,12 +115,25 @@ int main(int argc, char** argv) {
             auto* dptr = depth.ptr<float>(r);
             for (int c = 0 ; c < image.cols; ++c) {
                 int colorIdx = colorid[inptr[c]];
-                if (colorIdx >= 254) outptr[c] = 0;
+                if (colorIdx >= 254) {
+                    outptr[c] = 0;
+                    dptr[c] = 0.0f;
+                }
                 else outptr[c] = ark::util::paletteColor(colorIdx, true);
-                if(colorIdx != 0) dptr[c] = 0.0f;
             }
         }
 
+        if (rtreePath.size()) {
+            cv::Mat result = rtree.predictBest(depth, std::thread::hardware_concurrency());
+            for (int r = 0; r < depth.rows; ++r) {
+                auto* inPtr = result.ptr<uint8_t>(r);
+                auto* visualPtr = vis.ptr<cv::Vec3b>(r);
+                for (int c = 0; c < depth.cols; ++c){
+                    if (inPtr[c] == 255) continue;
+                    visualPtr[c] = ark::util::paletteColor(inPtr[c], true);
+                }
+            }
+        }
         for (int r = 0 ; r < image.rows; ++r) {
             auto* outptr = vis.ptr<cv::Vec3b>(r);
             const auto* rgbptr = imageRGB.ptr<cv::Vec3b>(r);
@@ -128,22 +141,7 @@ int main(int argc, char** argv) {
                 outptr[c] = rgbptr[c] / 3 + (outptr[c] - rgbptr[c]) / 3 * 2;
             }
         }
-
-        if (rtreePath.size()) {
-            cv::Mat result = rtree.predictBest(depth, std::thread::hardware_concurrency());
-            cv::Mat visual = cv::Mat::zeros(depth.size(), CV_8UC3);
-            for (int r = 0; r < depth.rows; ++r) {
-                auto* inPtr = result.ptr<uint8_t>(r);
-                auto* visualPtr = visual.ptr<cv::Vec3b>(r);
-                for (int c = 0; c < depth.cols; ++c){
-                    if (inPtr[c] == 255) continue;
-                    visualPtr[c] = ark::util::paletteColor(inPtr[c], true);
-                }
-            }
-            cv::imshow("Visual", visual);
-        } else {
-            cv::imshow("Visual", vis);
-        }
+        cv::imshow("Visual", vis);
         ++imId;
         int k = cv::waitKey(1);
         if (k == 'q') break;
