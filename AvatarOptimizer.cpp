@@ -5,7 +5,7 @@
 #include <atomic>
 #include <iostream>
 #include <Eigen/StdVector>
-#include <ceres/ceres.h>
+// #include <ceres/ceres.h>
 #include <nanoflann.hpp>
 #include <boost/thread.hpp>
 
@@ -17,7 +17,7 @@
 #include "Util.h"
 
 #define BEGIN_PROFILE auto start = std::chrono::high_resolution_clock::now()
-#define PROFILE(x) do{printf("%s: %f ms\n", #x, std::chrono::duration<double, std::milli>(std::chrono::high_resolution_clock::now() - start).count()); start = std::chrono::high_resolution_clock::now(); }while(false)
+#define PROFILE(x) do{printf("%s: %f ms\n", #x, std::chrono::duration<float, std::milli>(std::chrono::high_resolution_clock::now() - start).count()); start = std::chrono::high_resolution_clock::now(); }while(false)
 
 // Uncomment below line to compare analytic diff results to auto diff
 //#define TEST_COMPARE_AUTO_DIFF
@@ -72,58 +72,58 @@ namespace nanoflann {
     };
 }  // namespace nanoflann
 
-namespace ceres {
+// namespace ceres {
     /** WHY THIS? For our use case it is desirable to pre-compute the full Jacobian at an earlier stage but
      *  make use of the special addition operator for local parameterization. This is because some
      *  Jacobians are easier to compute wrt the local 'error' vector than the state. This is a known Ceres
      *  limitation, see https://groups.google.com/forum/#!msg/ceres-solver/fs8iNI9_F7Q/gv0R4NGLAwAJ
      *  Here, we set Jacobian to a dummy identity matrix, as suggested by a post on that page. The
      *  local Jacobian is multiplied manually in AvatarEvaluationCommonData where required. */
-    class FakeQuaternionParameterization : public ceres::LocalParameterization {
-     public:
-      ~FakeQuaternionParameterization() {}
-      bool Plus(const double* x_ptr,
-                const double* delta,
-                double* x_plus_delta_ptr) const {
-          // Copied from EigenQuaternionParameterization
-          Eigen::Map<Eigen::Quaterniond> x_plus_delta(x_plus_delta_ptr);
-          Eigen::Map<const Eigen::Quaterniond> x(x_ptr);
-
-          const double norm_delta =
-              sqrt(delta[0] * delta[0] + delta[1] * delta[1] + delta[2] * delta[2]);
-          if (norm_delta > 0.0) {
-              const double sin_delta_by_delta = sin(norm_delta) / norm_delta;
-
-              // Note, in the constructor w is first.
-              Eigen::Quaterniond delta_q(cos(norm_delta),
-                      sin_delta_by_delta * delta[0],
-                      sin_delta_by_delta * delta[1],
-                      sin_delta_by_delta * delta[2]);
-              x_plus_delta = delta_q * x;
-          } else {
-              x_plus_delta = x;
-          }
-          return true;
-      }
-      bool ComputeJacobian(const double* x, double* jacobian) const {
-          Eigen::Map<Eigen::Matrix<double, 4, 3, Eigen::RowMajor> > J(jacobian);
-          J.topLeftCorner<3,3>().setIdentity();
-          J.bottomRows<1>().setZero();
-          return true;
-      }
-      int GlobalSize() const { return 4; }
-      int LocalSize() const { return 3; }
-    };
-}
+//     class FakeQuaternionParameterization : public ceres::LocalParameterization {
+//      public:
+//       ~FakeQuaternionParameterization() {}
+//       bool Plus(const float* x_ptr,
+//                 const float* delta,
+//                 float* x_plus_delta_ptr) const {
+//           // Copied from EigenQuaternionParameterization
+//           Eigen::Map<Eigen::Quaternionf> x_plus_delta(x_plus_delta_ptr);
+//           Eigen::Map<const Eigen::Quaternionf> x(x_ptr);
+//
+//           const float norm_delta =
+//               sqrt(delta[0] * delta[0] + delta[1] * delta[1] + delta[2] * delta[2]);
+//           if (norm_delta > 0.0) {
+//               const float sin_delta_by_delta = sin(norm_delta) / norm_delta;
+//
+//               // Note, in the constructor w is first.
+//               Eigen::Quaternionf delta_q(cos(norm_delta),
+//                       sin_delta_by_delta * delta[0],
+//                       sin_delta_by_delta * delta[1],
+//                       sin_delta_by_delta * delta[2]);
+//               x_plus_delta = delta_q * x;
+//           } else {
+//               x_plus_delta = x;
+//           }
+//           return true;
+//       }
+//       bool ComputeJacobian(const float* x, float* jacobian) const {
+//           Eigen::Map<Eigen::Matrix<float, 4, 3, Eigen::RowMajor> > J(jacobian);
+//           J.topLeftCorner<3,3>().setIdentity();
+//           J.bottomRows<1>().setZero();
+//           return true;
+//       }
+//       int GlobalSize() const { return 4; }
+//       int LocalSize() const { return 3; }
+//     };
+// }
 
 namespace ark {
     namespace {
-        using MatAlloc = Eigen::aligned_allocator<Eigen::Matrix3d>;
-        using VecAlloc = Eigen::aligned_allocator<Eigen::Vector3d>;
+        using MatAlloc = Eigen::aligned_allocator<Eigen::Matrix3f>;
+        using VecAlloc = Eigen::aligned_allocator<Eigen::Vector3f>;
 
         /** Evaluation callback for Ceres */
         template<class Cache>
-        struct AvatarEvaluationCommonData : public ceres::EvaluationCallback {
+        struct AvatarEvaluationCommonData /*: public ceres::EvaluationCallback*/ {
             /** Max number of joint assignments to consider for each joint */
             static const int MAX_ASSIGN = 4;
 
@@ -150,7 +150,7 @@ namespace ark {
                 for (int point = 0; point < ava.model.numPoints(); ++point) {
                     auto& ances = ancestor[point];
                     for (auto & weight_joint : ava.model.assignedJoints[point]) {
-                        double weight = weight_joint.first;
+                        float weight = weight_joint.first;
                         int joint = weight_joint.second;
                         ances.emplace_back(joint, joint, weight);
                         for (int j = ava.model.parent[joint]; j != -1; j = ava.model.parent[j]) {
@@ -185,7 +185,7 @@ namespace ark {
                         }
                     } else {
                         for (int i = 0; i < ava.model.numShapeKeys(); ++i) {
-                            Eigen::MatrixXd::Scalar d;
+                            Eigen::MatrixXf::Scalar d;
                             Eigen::Map<const CloudType> keyCloud(ava.model.keyClouds.data() + i * ava.model.numPoints() * 3,
                                     3, ava.model.numPoints());
                             for (int j = 0; j < ava.model.numJoints(); ++j) {
@@ -203,7 +203,7 @@ namespace ark {
 
             /** Compute joint and point positions after applying shape keys*/
             void CalcShape() {
-                Eigen::Map<Eigen::VectorXd> shapedCloudVec(shapedCloud.data(), 3 * shapedCloud.cols());
+                Eigen::Map<Eigen::VectorXf> shapedCloudVec(shapedCloud.data(), 3 * shapedCloud.cols());
 
                 /** Apply shape keys */
                 shapedCloudVec.noalias() = ava.model.keyClouds * ava.w + ava.model.baseCloud; 
@@ -212,14 +212,14 @@ namespace ark {
                 // TODO: use dense joint regressor with compressed cloud
                 if (ava.model.useJointShapeRegressor) {
                     jointPosInit.resize(3, ava.model.numJoints());
-                    Eigen::Map<Eigen::VectorXd> jointPosVec(jointPosInit.data(), 3 * ava.model.numJoints());
+                    Eigen::Map<Eigen::VectorXf> jointPosVec(jointPosInit.data(), 3 * ava.model.numJoints());
                     jointPosVec.noalias() = ava.model.jointShapeRegBase + ava.model.jointShapeReg * ava.w;
                 } else {
                     jointPosInit.noalias() = shapedCloud * ava.model.jointRegressor;
                 }
 
                 /** Ensure root is at origin*/
-                Eigen::Vector3d offset = jointPosInit.col(0);
+                Eigen::Vector3f offset = jointPosInit.col(0);
                 shapedCloud.colwise() -= offset;
                 jointPosInit.colwise() -= offset;
 
@@ -232,14 +232,14 @@ namespace ark {
             }
 
             void PrepareForEvaluation(bool evaluate_jacobians,
-                    bool new_evaluation_point) final {
+                    bool new_evaluation_point) {
                 // std::cerr << "PREP " << evaluate_jacobians << ", " << new_evaluation_point << "\n";
                 if (new_evaluation_point) {
                     if (shape_enabled || !shape_computed) CalcShape();
                     jointVecInit.col(0).noalias() = ava.p;
 
                     for (int i = 0; i < numJointSpaces - 1; ++i) {
-                        // double * jacobian = localJacobian[i].data();
+                        // float * jacobian = localJacobian[i].data();
                         auto& x = opt.r[i].coeffs();
                         /** Jacobian of local parameterization '+' function at 0 */
                         localJacobian[i] << x(3),  x(2), -x(1),
@@ -253,7 +253,7 @@ namespace ark {
                     t(-1, -1).setZero();
                     for (int i = 0; i < numJointSpaces - 1; ++i) {
                         R(i, i).setIdentity();
-                        Eigen::Matrix3d rot = opt.r[i].toRotationMatrix();
+                        Eigen::Matrix3f rot = opt.r[i].toRotationMatrix();
                         t(i, i).setZero();
                         int p = ava.model.parent[i];
                         for (int j = p; ; j = ava.model.parent[j]) {
@@ -291,16 +291,16 @@ namespace ark {
             }
 
             /** Joint-to-ancestor joint rotation (j_ances=-1 is global) */
-            inline Eigen::Matrix3d& R(int j_ancestor, int j) {
+            inline Eigen::Matrix3f& R(int j_ancestor, int j) {
                 return _R[numJointSpaces * (j_ancestor+1) + j+1];
             }
             /** Joint-to-ancestor joint relative position (j_ances=-1 is global) */
-            inline Eigen::Vector3d& t(int j_ancestor, int j) {
+            inline Eigen::Vector3f& t(int j_ancestor, int j) {
                 return _t[numJointSpaces * (j_ancestor+1) + j+1];
             }
 
             /** Combined left-side matrix to multiply into Jacobians for joint j, component t */
-            // inline Eigen::Matrix3d& L(int j, int t) {
+            // inline Eigen::Matrix3f& L(int j, int t) {
             //     return _L[j * AvatarOptimizer::ROT_SIZE + t];
             // }
             AvatarOptimizer& opt;
@@ -310,7 +310,7 @@ namespace ark {
 
             struct Ancestor {
                 Ancestor() {}
-                explicit Ancestor(int jid, int assigned = -1, double assign_weight = 0.0) : jid(jid) {
+                explicit Ancestor(int jid, int assigned = -1, float assign_weight = 0.0) : jid(jid) {
                     if (assigned >= 0) {
                         assign[0] = assigned;
                         weight[0] = assign_weight;
@@ -327,7 +327,7 @@ namespace ark {
                 int assign[MAX_ASSIGN];
 
                 /** Assignment weight */
-                double weight[MAX_ASSIGN];
+                float weight[MAX_ASSIGN];
 
                 /** Number of assigned joints. */
                 int num_assign;
@@ -363,7 +363,7 @@ namespace ark {
             std::vector<Cache> caches;
 
             /** Local parameterization jacobian */
-            std::vector<Eigen::Matrix<double, 4, 3, Eigen::RowMajor>, Eigen::aligned_allocator<Eigen::Matrix<double, 4, 3, Eigen::RowMajor> > > localJacobian;
+            std::vector<Eigen::Matrix<float, 4, 3, Eigen::RowMajor>, Eigen::aligned_allocator<Eigen::Matrix<float, 4, 3, Eigen::RowMajor> > > localJacobian;
 
             /** Joint-to-parent 'shape deltas' */
             std::vector<CloudType, Eigen::aligned_allocator<CloudType> > S;
@@ -376,13 +376,13 @@ namespace ark {
 
         private:
             /** Joint-to-ancestor joint rotation (j_ances=-1 is global) */
-            std::vector<Eigen::Matrix3d, MatAlloc> _R;
+            std::vector<Eigen::Matrix3f, MatAlloc> _R;
 
             /** Joint-to-ancestor joint relative position (j_ances=-1 is global) */
-            std::vector<Eigen::Vector3d, VecAlloc> _t;
+            std::vector<Eigen::Vector3f, VecAlloc> _t;
 
             /** Combined left-side matrix to use for Jacobians for joint j, component t */
-            // std::vector<Eigen::Matrix3d, MatAlloc> _L;
+            // std::vector<Eigen::Matrix3f, MatAlloc> _L;
 
             /** True if CalcShape() has been called, to avoid further calls */
             bool shape_computed;
@@ -400,18 +400,18 @@ namespace ark {
                   }
             }
 
-            bool getICPJacobians(double* residuals, double** jacobians) const {
-                Eigen::Map<Eigen::Vector3d> residualMap(residuals);
+            bool getICPJacobians(float* residuals, float** jacobians) const {
+                Eigen::Map<Eigen::Vector3f> residualMap(residuals);
                 residualMap.noalias() = resid;
                 if (jacobians != nullptr) {
                     if (jacobians[0] != nullptr) {
-                        Eigen::Map<Eigen::Matrix<double, 3, 3, Eigen::RowMajor>> J(jacobians[0]);
+                        Eigen::Map<Eigen::Matrix<float, 3, 3, Eigen::RowMajor>> J(jacobians[0]);
                         J.setIdentity();
                     }
                     size_t i = 0;
                     for (; i < commonData.ancestor[pointId].size(); ++i) {
                         if (jacobians[i+1] != nullptr) {
-                            Eigen::Map<Eigen::Matrix<double, 3, 4, Eigen::RowMajor> > J(jacobians[i+1]);
+                            Eigen::Map<Eigen::Matrix<float, 3, 4, Eigen::RowMajor> > J(jacobians[i+1]);
 #ifdef TEST_COMPARE_AUTO_DIFF
                             J.noalias() = icpJacobian[i];
 #else
@@ -421,7 +421,7 @@ namespace ark {
                         }
                     }
                     if (commonData.shape_enabled && jacobians[i + 1] != nullptr) {
-                        Eigen::Map<Eigen::Matrix<double, 3, Eigen::Dynamic, Eigen::RowMajor> > J(jacobians[i + 1], 3, ava.model.numShapeKeys());
+                        Eigen::Map<Eigen::Matrix<float, 3, Eigen::Dynamic, Eigen::RowMajor> > J(jacobians[i + 1], 3, ava.model.numShapeKeys());
                         J.noalias() = icpShapeJacobian;
                     }
                 }
@@ -440,9 +440,9 @@ namespace ark {
                     // TODO: precompute point-to-assigned-joint vector, reduce 3 flops
                     //CloudType pointVecs;
 
-                    Eigen::Matrix<double, 3, 4> dRot;
-                    // Eigen::Matrix3d vCross;
-                    Eigen::Vector3d v;
+                    Eigen::Matrix<float, 3, 4> dRot;
+                    // Eigen::Matrix3f vCross;
+                    Eigen::Vector3f v;
 
                     for (size_t i = 0; i < commonData.ancestor[pointId].size(); ++i) {
                         // Set derivative for each parent rotation
@@ -458,10 +458,10 @@ namespace ark {
                         }
                         // std::cerr <<v.transpose<< "\n"
 
-                        Eigen::Quaterniond& q = opt.r[j];
-                        Eigen::Vector3d u = q.vec() * 2;
+                        Eigen::Quaternionf& q = opt.r[j];
+                        Eigen::Vector3f u = q.vec() * 2;
                         // Quaternion-vector rotation (pseudo-)Jacobian
-                        double w = q.w() * 2;
+                        float w = q.w() * 2;
                         dRot << 
                             u(1)*v(1) + v(2)*u(2)    ,
                             w*v(2)    + u(0)*v(1)   - 2*u(1)*v(0),
@@ -487,7 +487,7 @@ namespace ark {
 
                     if (commonData.shape_enabled) {
                         icpShapeJacobian.setZero();
-                        for (const std::pair<double,int>& assign : ava.model.assignedJoints[pointId]) {
+                        for (const std::pair<float,int>& assign : ava.model.assignedJoints[pointId]) {
                             const int j = assign.second;
                             auto pointDeltas = ava.model.keyClouds.middleRows<3>(pointId * 3);
                             icpShapeJacobian += (commonData.R(-1, j) * (pointDeltas - commonData.S[j]) + commonData.H[j]) * assign.first;
@@ -496,20 +496,20 @@ namespace ark {
                 }
             }
 
-            Eigen::Vector3d resid;
+            Eigen::Vector3f resid;
 #ifdef TEST_COMPARE_AUTO_DIFF
             // For comparing with auto diff, we cannot multiply by the
             // local param jacobian or result would not be comparable
-            std::vector<Eigen::Matrix<double, 3, 4, Eigen::RowMajor>,
+            std::vector<Eigen::Matrix<float, 3, 4, Eigen::RowMajor>,
                         Eigen::aligned_allocator<
-                            Eigen::Matrix<double, 3, 4, Eigen::RowMajor> > > icpJacobian;
+                            Eigen::Matrix<float, 3, 4, Eigen::RowMajor> > > icpJacobian;
 #else
-            std::vector<Eigen::Matrix<double, 3, 3, Eigen::RowMajor>,
+            std::vector<Eigen::Matrix<float, 3, 3, Eigen::RowMajor>,
                         Eigen::aligned_allocator<
-                            Eigen::Matrix<double, 3, 3, Eigen::RowMajor> > > icpJacobian;
+                            Eigen::Matrix<float, 3, 3, Eigen::RowMajor> > > icpJacobian;
 #endif
 
-            Eigen::Matrix<double, 3, Eigen::Dynamic, Eigen::RowMajor> icpShapeJacobian;
+            Eigen::Matrix<float, 3, Eigen::Dynamic, Eigen::RowMajor> icpShapeJacobian;
 
             Avatar& ava;
             AvatarOptimizer& opt;
@@ -519,28 +519,18 @@ namespace ark {
 
         /** Ceres analytic derivative cost function for ICP error.
          *  Works for pose parameters only. */
-        struct AvatarICPCostFunctor : ceres::CostFunction {
+        struct AvatarICPCostFunctor {
             AvatarICPCostFunctor(AvatarEvaluationCommonData<AvatarCostFunctorCache> & common_data,
                     size_t cache_id, const CloudType& data_cloud, int data_point_id)
                 : commonData(common_data), cacheId(cache_id), dataCloud(data_cloud), dataPointId(data_point_id) {
-                set_num_residuals(3);
                 auto& cache = common_data.caches[cache_id];
-
-                std::vector<int> * paramBlockSizes = mutable_parameter_block_sizes();
-                paramBlockSizes->push_back(3); // Root position
-                for (size_t i = 0; i < cache.commonData.ancestor[cache.pointId].size(); ++i) {
-                    paramBlockSizes->push_back(4); // Add rotation block for each ancestor
-                }
-                if (commonData.shape_enabled) paramBlockSizes->push_back(cache.ava.model.numShapeKeys()); // Shape key weights?
             }
 
-            bool Evaluate(double const* const* parameters,
-                          double* residuals,
-                          double** jacobians) const final {
-                if (!commonData.caches[cacheId].getICPJacobians(residuals, jacobians)) return false;
-                Eigen::Map<Eigen::Vector3d> resid(residuals);
-                resid -= dataCloud.col(dataPointId);
-                return true;
+            void evaluate(const Eigen::VectorXf& parameters,
+                          Eigen::VectorXf& residuals,
+                          Eigen::VectorXf& derivatives) const {
+                commonData.caches[cacheId].getICPJacobians(residuals, jacobians);
+                residuals -= dataCloud.col(dataPointId);
             }
             const CloudType& dataCloud;
             int dataPointId;
@@ -549,76 +539,56 @@ namespace ark {
         };
 
         /** Ceres analytic derivative cost function for pose prior error */
-        struct AvatarPosePriorCostFunctor : ceres::CostFunction {
+        struct AvatarPosePriorCostFunctor {
+            std::vector<Eigen::MatrixXf> Jcomp;
             AvatarPosePriorCostFunctor(AvatarEvaluationCommonData<AvatarCostFunctorCache> & common_data)
                 : commonData(common_data), posePrior(commonData.ava.model.posePrior),
-                  nSmplJoints(commonData.ava.model.numJoints() - 1) {
-                set_num_residuals(nSmplJoints * 3 + 1); // 3 for each joint + 1 extra
-                std::vector<int> * paramBlockSizes = mutable_parameter_block_sizes();
-                for (int i = 0; i < nSmplJoints; ++i) {
-                    paramBlockSizes->push_back(4); // Add rotation block for each non-root joint
-                }
+                  nSmplJoints(commonData.ava.model.numJoints() - 1), nResids(nSmplJoints * 3 + 1) {
+                // set_num_residuals(nSmplJoints * 3 + 1); // 3 for each joint + 1 extra
+                // std::vector<int> * paramBlockSizes = mutable_parameter_block_sizes();
+                // for (int i = 0; i < nSmplJoints; ++i) {
+                    // paramBlockSizes->push_back(4); // Add rotation block for each non-root joint
+                // }
+                 Jcomp.resize(posePrior.numComponents());
+                 for (int k = 0; k < posePrior.numComponents(); ++k) {
+                     const Eigen::MatrixXf& L = posePrior.prec_cho[k];
+                     Jcomp[k].resize(nResids - 1, 3 * nSmplJoints);
+                     for (int i = 0; i < nSmplJoints; ++i) {
+                         Jcomp[k].middleCols<3>(i * 3).noalias() = L.middleRows<3>(i * 3).transpose() * sqrt(0.5);
+                     }
+                 }
             }
 
-            bool Evaluate(double const* const* parameters,
-                          double* residuals,
-                          double** jacobians) const final {
-                const int nResids = nSmplJoints * 3 + 1;
-                Eigen::VectorXd smplParams(nSmplJoints * 3);
-                for (int i = 0; i < nSmplJoints; ++i) {
-                    Eigen::Map<const Eigen::Quaterniond> q(parameters[i]);
-                    Eigen::AngleAxisd aa(q);
-                    smplParams.segment<3>(i * 3) = aa.axis() * aa.angle();
-                }
-                Eigen::Map<Eigen::VectorXd> resid(residuals, nResids);
+            float evaluate(const Eigen::VectorXf& smpl_params,
+                          Eigen::VectorXf& derivatives) const {
+                // parameters must be smpl params: 3 * nSmplJoints
+                // residuals: 3 * nSmplJoints + 1
                 int compIdx;
-                resid.noalias() = posePrior.residual(smplParams, &compIdx) * commonData.opt.betaPose;
-                if (jacobians != nullptr) {
-                    const Eigen::MatrixXd& L = posePrior.prec_cho[compIdx];
-                    // precision = L L^T
-                    for (int i = 0; i < nSmplJoints; ++i) {
-                        if (jacobians[i] != nullptr) {
-                            Eigen::Map<Eigen::Matrix<double, Eigen::Dynamic, 4, Eigen::RowMajor> > J(jacobians[i], nResids, 4);
-                            J.topLeftCorner<Eigen::Dynamic, 3>(nResids - 1, 3).noalias() = L.middleRows<3>(i * 3).transpose() *
-                                                                                               sqrt(0.5) * commonData.opt.betaPose;
-                            J.rightCols<1>().setZero();
-                            J.bottomLeftCorner<1, 3>().setZero();
-                        }
-                    }
-                }                
-                return true;
+                Eigen::VectorXf residuals = posePrior.residual(smpl_params, &compIdx);
+                derivatives.segment(3, 3 * nSmplJoints).noalias() += residuals.head(nResids - 1).transpose() * Jcomp[compIdx] * commonData.opt.betaPose;
+                return 0.5 * commonData.opt.betaPose * residuals.squaredNorm();
             }
             AvatarEvaluationCommonData<AvatarCostFunctorCache>& commonData;
             const GaussianMixture& posePrior;
             const int nSmplJoints;
+            const int nResids;
         };
 
         /** Ceres analytic derivative cost function for shape prior error
          *  (This is extremely simple, just the squared l2-norm of w!) */
-        struct AvatarShapePriorCostFunctor : ceres::CostFunction {
-            AvatarShapePriorCostFunctor(int num_shape_keys, double beta_shape) :
+        struct AvatarShapePriorCostFunctor {
+            AvatarShapePriorCostFunctor(int num_shape_keys, float beta_shape) :
                 numShapeKeys(num_shape_keys), betaShape(beta_shape) {
-                set_num_residuals(numShapeKeys); // 1 for each shape key
-                std::vector<int> * paramBlockSizes = mutable_parameter_block_sizes();
-                paramBlockSizes->push_back(numShapeKeys); // 1 for each shape key
             }
 
-            bool Evaluate(double const* const* parameters,
-                          double* residuals,
-                          double** jacobians) const final {
-                Eigen::Map<Eigen::VectorXd> resid(residuals, numShapeKeys);
-                Eigen::Map<const Eigen::VectorXd> w(parameters[0], numShapeKeys);
-                resid.noalias() = w * betaShape;
-                if (jacobians != nullptr) {
-                    if (jacobians[0] != nullptr) {
-                        Eigen::Map<Eigen::MatrixXd> J(jacobians[0], numShapeKeys, numShapeKeys);
-                        J.noalias() = Eigen::MatrixXd::Identity(numShapeKeys, numShapeKeys) * betaShape;
-                    }
-                }
-                return true;
+            float evaluate(const Eigen::VectorXf& parameters,
+                          Eigen::VectorXf& derivatives) const {
+                auto w = parameters.tail<10>();
+                derivatives.tail<10>().noalias() += w * betaShape;
+                return 0.5 * betaShape * w.squaredNorm();
             }
             const int numShapeKeys;
-            const double betaShape;
+            const float betaShape;
         };
 
 #ifdef TEST_COMPARE_AUTO_DIFF
@@ -703,8 +673,8 @@ namespace ark {
             KdTree * kd_tree = nullptr) {
 
             if (invert) {
-                size_t index; double dist;
-                nanoflann::KNNResultSet<double> resultSet(1);
+                size_t index; float dist;
+                nanoflann::KNNResultSet<float> resultSet(1);
                 // match each data point to a model point
                 typedef nanoflann::KDTreeEigenColMajorMatrixAdaptor<
                     CloudType, 3, nanoflann::metric_L2_Simple> KdTree;
@@ -733,8 +703,8 @@ namespace ark {
                 }
 
             } else {
-                size_t index; double dist;
-                nanoflann::KNNResultSet<double> resultSet(1);
+                size_t index; float dist;
+                nanoflann::KNNResultSet<float> resultSet(1);
 
                 // match each model point to a data point
                 bool ownTree = kd_tree == nullptr;
@@ -902,7 +872,7 @@ namespace ark {
             AvatarICPCostFunctor* our_cost_function = new AvatarICPCostFunctor(common, 0, data_cloud, data_point_id);
                              // NULL, pointParams[i]);
 
-            std::vector<double*> params, fullParams;
+            std::vector<float*> params, fullParams;
             params.reserve(common.ancestor[model_point_id].size() + 1);
             params.push_back(common.ava.p.data());
             for (auto& ances : common.ancestor[model_point_id]) {
@@ -919,23 +889,23 @@ namespace ark {
                 fullParams.push_back(common.ava.w.data());
             }
 
-            double resid[3];
-            double ** jaco = new double*[params.size()];
-            jaco[0] = new double[3*3];
+            float resid[3];
+            float ** jaco = new float*[params.size()];
+            jaco[0] = new float[3*3];
             for (int i = 1; i < params.size()-1; ++i) {
-                jaco[i] = new double[3*4];
+                jaco[i] = new float[3*4];
             }
-            jaco[params.size()-1] = new double[3*opt.ava.model.numShapeKeys()];
+            jaco[params.size()-1] = new float[3*opt.ava.model.numShapeKeys()];
             common.PrepareForEvaluation(true, true);
             our_cost_function->Evaluate(&params[0], resid, jaco); 
             std::cerr << "Residual ours \n" << resid[0] << " " << resid[1] << " " << resid[2] << "\n";
 
-            double** jaco2 = new double*[fullParams.size()];
-            jaco2[0] = new double[3*3];
+            float** jaco2 = new float*[fullParams.size()];
+            jaco2[0] = new float[3*3];
             for (int i = 1; i < fullParams.size()-1; ++i) {
-                jaco2[i] = new double[3*4];
+                jaco2[i] = new float[3*4];
             }
-            jaco2[fullParams.size()-1] = new double[3*opt.ava.model.numShapeKeys()];
+            jaco2[fullParams.size()-1] = new float[3*opt.ava.model.numShapeKeys()];
             cost_function->Evaluate(&fullParams[0], resid, jaco2); 
             std::cerr << "Residual theirs \n" << resid[0] << " " << resid[1] << " " << resid[2] << "\n";
 
@@ -996,7 +966,7 @@ namespace ark {
         r.resize(ava.model.numJoints());
     }
 
-    void AvatarOptimizer::optimize(const Eigen::Matrix<double, 3, Eigen::Dynamic>& data_cloud, int icp_iters, int num_threads) {
+    void AvatarOptimizer::optimize(const Eigen::Matrix<float, 3, Eigen::Dynamic>& data_cloud, int icp_iters, int num_threads) {
         // Convert to quaternion
         for (int i = 0; i < ava.model.numJoints(); ++i) {
             Eigen::AngleAxisd aa;
@@ -1076,7 +1046,7 @@ namespace ark {
             }
             common.caches.clear();
             //std::vector<std::tuple<ceres::ResidualBlockId, int, int> > residuals;
-            std::vector<std::vector<double*> > pointParams(ava.model.numPoints());
+            std::vector<std::vector<float*> > pointParams(ava.model.numPoints());
             for (int i = 0; i < ava.model.numPoints(); ++i)  {
                 if (correspondences[i].empty()) continue;
                 auto& params = pointParams[i];
@@ -1092,7 +1062,7 @@ namespace ark {
             }
             PROFILE(>> Construct problem: parameter blocks);
             // // DEBUG
-            // std::vector<double*> params;
+            // std::vector<float*> params;
             // params.push_back(ava.p.data());
             // for (int k = 0; k < ava.model.numJoints(); ++k) {
             //     params.push_back(r[k].coeffs().data());
@@ -1109,7 +1079,7 @@ namespace ark {
                 ++cid;
             }
 
-            std::vector<double*> posePriorParams;
+            std::vector<float*> posePriorParams;
             posePriorParams.reserve(ava.model.numJoints() - 1);
             for (int i = 1; i < ava.model.numJoints(); ++i) {
                 posePriorParams.push_back(r[i].coeffs().data());
@@ -1146,7 +1116,7 @@ namespace ark {
             /*
             // This block shows the value of each residual
             for (auto& res_tup : residuals) {
-                double val;
+                float val;
                 ceres::Problem::EvaluateOptions eo;
                 eo.residual_blocks.push_back(std::get<0>(res_tup));
                 problem.Evaluate(eo, &val, NULL, NULL, NULL);
@@ -1157,7 +1127,7 @@ namespace ark {
         viewer->spin();
     }
 
-    void AvatarOptimizer::align(const Eigen::Matrix<double, 3, Eigen::Dynamic>& smpl_joints, int icp_iters, int num_threads) {
+    void AvatarOptimizer::align(const Eigen::Matrix<float, 3, Eigen::Dynamic>& smpl_joints, int icp_iters, int num_threads) {
         // Convert to quaternion
         for (int i = 0; i < ava.model.numJoints(); ++i) {
             Eigen::AngleAxisd aa;
@@ -1186,7 +1156,7 @@ namespace ark {
         options.max_num_iterations = 4;
         options.num_threads = common.numThreads;
         options.function_tolerance = 1e-4;
-        options.dense_linear_algebra_library_type = ceres::DenseLinearAlgebraLibraryType::LAPACK;
+        options.dense_linear_algebra_library_type = ceres::DenseLinearAlgebraLibraryType::EIGEN;
 
         options.evaluation_callback = &common;
 
@@ -1204,7 +1174,7 @@ namespace ark {
             }
             common.caches.clear();
             //std::vector<std::tuple<ceres::ResidualBlockId, int, int> > residuals;
-            std::vector<std::vector<double*> > pointParams(ava.model.numJoints());
+            std::vector<std::vector<float*> > pointParams(ava.model.numJoints());
             for (int i = 0; i < ava.model.numJoints(); ++i)  {
                 auto& params = pointParams[i];
                 common.caches.emplace_back(common, i);
@@ -1218,7 +1188,7 @@ namespace ark {
             }
             PROFILE(>> Construct problem: parameter blocks);
             // // DEBUG
-            // std::vector<double*> params;
+            // std::vector<float*> params;
             // params.push_back(ava.p.data());
             // for (int k = 0; k < ava.model.numJoints(); ++k) {
             //     params.push_back(r[k].coeffs().data());
@@ -1232,7 +1202,7 @@ namespace ark {
                 ++cid;
             }
 
-            std::vector<double*> posePriorParams;
+            std::vector<float*> posePriorParams;
             posePriorParams.reserve(ava.model.numJoints() - 1);
             for (int i = 1; i < ava.model.numJoints(); ++i) {
                 posePriorParams.push_back(r[i].coeffs().data());
@@ -1248,15 +1218,15 @@ namespace ark {
             // debugVisualize(viewer, data_cloud, correspondences, pointVisible, common);
 
             // Run solver
-            Solver::Summary summary;
+            // Solver::Summary summary;
             PROFILE(>> Render in PCL);
 
-            ceres::Solve(options, &problem, &summary);
+            // ceres::Solve(options, &problem, &summary);
 
             PROFILE(>> Solve);
 
             // output (for debugging)
-            std::cout << summary.FullReport() << "\n";
+            // std::cout << summary.FullReport() << "\n";
 
             // Convert from quaternion
             for (int i = 0; i < ava.model.numJoints(); ++i) {
@@ -1268,7 +1238,7 @@ namespace ark {
             /*
             // This block shows the value of each residual
             for (auto& res_tup : residuals) {
-                double val;
+                float val;
                 ceres::Problem::EvaluateOptions eo;
                 eo.residual_blocks.push_back(std::get<0>(res_tup));
                 problem.Evaluate(eo, &val, NULL, NULL, NULL);

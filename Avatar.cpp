@@ -11,14 +11,14 @@
 #include "Util.h"
 
 #define BEGIN_PROFILE auto start = std::chrono::high_resolution_clock::now()
-#define PROFILE(x) do{printf("%s: %f ms\n", #x, std::chrono::duration<double, std::milli>(std::chrono::high_resolution_clock::now() - start).count()); start = std::chrono::high_resolution_clock::now(); }while(false)
+#define PROFILE(x) do{printf("%s: %f ms\n", #x, std::chrono::duration<float, std::milli>(std::chrono::high_resolution_clock::now() - start).count()); start = std::chrono::high_resolution_clock::now(); }while(false)
 
 namespace {
     /** Hand-written faster function to load a saved PCL point cloud directly
      *  into an Eigen vector, where points are stored: x1 y1 z1 x2 y2 z2 ...
      *  The reason we flatten the cloud instead of using a matrix is to make it easier
      *  to add in shape keys, which would otherwise need to be tensors */
-    Eigen::VectorXd loadPCDToPointVectorFast(const std::string& path) {
+    Eigen::VectorXf loadPCDToPointVectorFast(const std::string& path) {
         std::ifstream pcd(path);
         int nPoints = -1;
         while (pcd) {
@@ -49,7 +49,7 @@ namespace {
             std::exit(0);
         }
 
-        Eigen::VectorXd result(nPoints * 3);
+        Eigen::VectorXf result(nPoints * 3);
         for (int i = 0; i < nPoints * 3; ++i) {
             pcd >> result(i);
         }
@@ -57,8 +57,8 @@ namespace {
     }
 
     /** Spherical to rectangular coords */
-    inline void fromSpherical(double rho, double theta,
-                        double phi, Eigen::Vector3d& out) {
+    inline void fromSpherical(float rho, float theta,
+                        float phi, Eigen::Vector3f& out) {
         out[0] = rho * sin(phi) * cos(theta);
         out[1] = rho * cos(phi);
         out[2] = rho * sin(phi) * sin(theta);
@@ -75,7 +75,7 @@ namespace {
             const cv::Vec3i& face
             ) {
         // const auto face = mesh.col(face_id);
-        std::pair<double, int> yf[3] =
+        std::pair<float, int> yf[3] =
         {
             {projected[face(0)].y, 0},
             {projected[face(1)].y, 1},
@@ -154,10 +154,10 @@ namespace {
             cv::Mat& output_assigned_joint_mask,
             const cv::Size& image_size,
             const std::vector<cv::Point2f>& projected,
-            const std::vector<std::vector<std::pair<double, int> > > & assigned_joint,
+            const std::vector<std::vector<std::pair<float, int> > > & assigned_joint,
             const cv::Vec3i& face,
             const int* part_map) {
-        std::pair<double, int> xf[3] =
+        std::pair<float, int> xf[3] =
         {
             {projected[face[0]].x, 0},
             {projected[face[1]].x, 1},
@@ -192,10 +192,10 @@ namespace {
             midxi = std::floor(b.x);
 
         if (a.x != b.x) {
-            double mhi = (c.y-a.y)/(c.x-a.x);
-            double bhi = a.y - a.x * mhi;
-            double mlo = (b.y-a.y)/(b.x-a.x);
-            double blo = a.y - a.x * mlo;
+            float mhi = (c.y-a.y)/(c.x-a.x);
+            float bhi = a.y - a.x * mhi;
+            float mlo = (b.y-a.y)/(b.x-a.x);
+            float blo = a.y - a.x * mlo;
             if (b.y > c.y) {
                 std::swap(mlo, mhi);
                 std::swap(blo, bhi);
@@ -221,10 +221,10 @@ namespace {
             }
         }
         if (b.x != c.x) {
-            double mhi = (c.y-a.y)/(c.x-a.x);
-            double bhi = a.y - a.x * mhi;
-            double mlo = (c.y-b.y)/(c.x-b.x);
-            double blo = b.y - b.x * mlo;
+            float mhi = (c.y-a.y)/(c.x-a.x);
+            float bhi = a.y - a.x * mhi;
+            float mlo = (c.y-b.y)/(c.x-b.x);
+            float blo = b.y - b.x * mlo;
             if (b.y > a.y) {
                 std::swap(mlo, mhi);
                 std::swap(blo, bhi);
@@ -234,8 +234,8 @@ namespace {
                     maxyi = std::min<int>(std::ceil(mhi * i + bhi), image_size.height-1);
                 if (minyi > maxyi) continue;
 
-                double w1v = (b.y - c.y) * (i - c.x);
-                double w2v = (c.y - a.y) * (i - c.x);
+                float w1v = (b.y - c.y) * (i - c.x);
+                float w2v = (c.y - a.y) * (i - c.x);
                 for (int j = minyi; j <= maxyi; ++j) {
                     auto& out = output_assigned_joint_mask.at<uint8_t>(j, i);
                     int dista = (a.x - i) * (a.x - i) + (a.y - j) * (a.y - j);
@@ -261,7 +261,7 @@ namespace {
             const std::vector<cv::Point2f>& projected,
             const cv::Vec3i& face,
             T color) {
-        std::pair<double, int> yf[3] =
+        std::pair<float, int> yf[3] =
         {
             {projected[face[0]].y, 0},
             {projected[face[1]].y, 1},
@@ -282,10 +282,10 @@ namespace {
             midyi = std::floor(b.y);
 
         if (a.y != b.y) {
-            double mhi = (c.x-a.x)/(c.y-a.y);
-            double bhi = a.x - a.y * mhi;
-            double mlo = (b.x-a.x)/(b.y-a.y);
-            double blo = a.x - a.y * mlo;
+            float mhi = (c.x-a.x)/(c.y-a.y);
+            float bhi = a.x - a.y * mhi;
+            float mlo = (b.x-a.x)/(b.y-a.y);
+            float blo = a.x - a.y * mlo;
             if (b.x > c.x) {
                 std::swap(mlo, mhi);
                 std::swap(blo, bhi);
@@ -299,10 +299,10 @@ namespace {
             }
         }
         if (b.y != c.y) {
-            double mhi = (c.x-a.x)/(c.y-a.y);
-            double bhi = a.x - a.y * mhi;
-            double mlo = (c.x-b.x)/(c.y-b.y);
-            double blo = b.x - b.y * mlo;
+            float mhi = (c.x-a.x)/(c.y-a.y);
+            float bhi = a.x - a.y * mhi;
+            float mlo = (c.x-b.x)/(c.y-b.y);
+            float blo = b.x - b.y * mlo;
             if (b.x > a.x) {
                 std::swap(mlo, mhi);
                 std::swap(blo, bhi);
@@ -369,12 +369,12 @@ namespace ark {
             int nEntries; skel >> nEntries;
             assignedJoints[i].reserve(nEntries);
             for (int j = 0; j < nEntries; ++j) {
-                int joint; double w;
+                int joint; float w;
                 skel >> joint >> w;
                 assignedPoints[joint].emplace_back(w, i);
                 assignedJoints[i].emplace_back(w, joint);
             }
-            std::sort(assignedJoints[i].begin(), assignedJoints[i].end(), [](const std::pair<double, int>& a, const std::pair<double, int>& b) {
+            std::sort(assignedJoints[i].begin(), assignedJoints[i].end(), [](const std::pair<float, int>& a, const std::pair<float, int>& b) {
                         return a.first > b.first;
                     });
             totalAssignments += nEntries;
@@ -382,7 +382,7 @@ namespace ark {
 
         size_t totalPoints = 0;
         assignStarts.resize(nJoints+1);
-        assignWeights = Eigen::SparseMatrix<double>(totalAssignments, nPoints);
+        assignWeights = Eigen::SparseMatrix<float>(totalAssignments, nPoints);
         assignWeights.reserve(Eigen::VectorXi::Constant(nPoints, 4));
         for (int i = 0; i < nJoints; ++i) {
             assignStarts[i] = totalPoints;
@@ -429,13 +429,13 @@ namespace ark {
             jsr.close();
         } else {
             std::ifstream jr(jrPath.string());
-            jointRegressor = Eigen::SparseMatrix<double>(nPoints, nJoints);
+            jointRegressor = Eigen::SparseMatrix<float>(nPoints, nJoints);
             if (jr) {
                 jr >> nJoints;
                 jointRegressor.reserve(nJoints * 10);
                 for (int i = 0; i < nJoints; ++i) {
                     int nEntries; jr >> nEntries;
-                    int pointIdx; double val;
+                    int pointIdx; float val;
                     for (int j = 0; j < nEntries; ++j) {
                         jr >> pointIdx >> val;
                         jointRegressor.insert(pointIdx, i) = val;
@@ -466,13 +466,13 @@ namespace ark {
         }
     }
 
-    Eigen::VectorXd AvatarPoseSequence::getFrame(size_t frame_id) const {
+    Eigen::VectorXf AvatarPoseSequence::getFrame(size_t frame_id) const {
         if (preloaded) return data.col(frame_id);
         std::ifstream ifs(sequencePath, std::ios::in | std::ios::binary);
-        ifs.seekg(frame_id * frameSize * sizeof(double), std::ios_base::beg);
-        Eigen::VectorXd result(frameSize);
+        ifs.seekg(frame_id * frameSize * sizeof(float), std::ios_base::beg);
+        Eigen::VectorXf result(frameSize);
         ifs.read(reinterpret_cast<char*>(result.data()),
-                 frameSize * sizeof(double));
+                 frameSize * sizeof(float));
         return result;
     }
 
@@ -496,7 +496,7 @@ namespace ark {
         /** Apply joint [shape] regressor */
         if (model.useJointShapeRegressor) {
             jointPos.resize(3, model.numJoints());
-            Eigen::Map<Eigen::VectorXd> jointPosVec(jointPos.data(), 3 * model.numJoints());
+            Eigen::Map<Eigen::VectorXf> jointPosVec(jointPos.data(), 3 * model.numJoints());
             jointPosVec.noalias() = model.jointShapeRegBase + model.jointShapeReg * w;
         } else {
             jointPos.noalias() = shapedCloud * model.jointRegressor;
@@ -566,22 +566,22 @@ namespace ark {
 
         if (randomize_root_pos_rot) {
             // Root position
-            Eigen::Vector3d pos;
+            Eigen::Vector3f pos;
             pos.x() = random_util::uniform(rg, -1.0, 1.0);
             pos.y() = random_util::uniform(rg, -0.5, 0.5);
             pos.z() = random_util::uniform(rg, 2.2, 4.5);
             p = pos;
 
             // Root rotation
-            const Eigen::Vector3d axis_up(0., 1., 0.);
-            double angle_up  = random_util::uniform(rg, -M_PI / 3., M_PI / 3.) + M_PI;
+            const Eigen::Vector3f axis_up(0., 1., 0.);
+            float angle_up  = random_util::uniform(rg, -M_PI / 3., M_PI / 3.) + M_PI;
             Eigen::AngleAxisd aa_up(angle_up, axis_up);
 
-            double theta = random_util::uniform(rg, 0, 2 * M_PI);
-            double phi   = random_util::uniform(rg, -M_PI/2, M_PI/2);
-            Eigen::Vector3d axis_perturb;
+            float theta = random_util::uniform(rg, 0, 2 * M_PI);
+            float phi   = random_util::uniform(rg, -M_PI/2, M_PI/2);
+            Eigen::Vector3f axis_perturb;
             fromSpherical(1.0, theta, phi, axis_perturb);
-            double angle_perturb = random_util::randn(rg, 0.0, 0.2);
+            float angle_perturb = random_util::randn(rg, 0.0, 0.2);
             Eigen::AngleAxisd aa_perturb(angle_perturb, axis_perturb);
 
             r[0] = (aa_perturb * aa_up).toRotationMatrix();
@@ -592,8 +592,8 @@ namespace ark {
         random_util::randint(0, 100);
     }
 
-    Eigen::VectorXd Avatar::smplParams() const {
-        Eigen::VectorXd res;
+    Eigen::VectorXf Avatar::smplParams() const {
+        Eigen::VectorXf res;
         res.resize((model.numJoints() - 1) * 3);
         for (int i = 1; i < model.numJoints(); ++i) {
             Eigen::AngleAxisd aa;
@@ -603,7 +603,7 @@ namespace ark {
         return res;
     }
 
-    double Avatar::pdf() const {
+    float Avatar::pdf() const {
         return model.posePrior.pdf(smplParams());
     }
 
@@ -611,39 +611,39 @@ namespace ark {
     {
         ARK_ASSERT(pos.cols() == SmplJoint::_COUNT, "Joint number mismatch");
 
-        Eigen::Vector3d vr = model.initialJointPos.col(SmplJoint::SPINE1) - model.initialJointPos.col(SmplJoint::ROOT_PELVIS);
-        Eigen::Vector3d vrt = pos.col(SmplJoint::SPINE1) - pos.col(SmplJoint::ROOT_PELVIS);
+        Eigen::Vector3f vr = model.initialJointPos.col(SmplJoint::SPINE1) - model.initialJointPos.col(SmplJoint::ROOT_PELVIS);
+        Eigen::Vector3f vrt = pos.col(SmplJoint::SPINE1) - pos.col(SmplJoint::ROOT_PELVIS);
         if (!std::isnan(pos(0, 0))) {
             p = pos.col(0);
         }
         if (!std::isnan(vr.x()) && !std::isnan(vrt.x())) {
-            r[0] = Eigen::Quaterniond::FromTwoVectors(vr, vrt).toRotationMatrix();
+            r[0] = Eigen::Quaternionf::FromTwoVectors(vr, vrt).toRotationMatrix();
         } else{
             r[0].setIdentity();
         }
 
-        std::vector<Eigen::Matrix3d, Eigen::aligned_allocator<Eigen::Matrix3d> > rotTrans(pos.cols());
+        std::vector<Eigen::Matrix3f, Eigen::aligned_allocator<Eigen::Matrix3f> > rotTrans(pos.cols());
         rotTrans[0] = r[0];
 
-        double scaleAvg = 0.0;
+        float scaleAvg = 0.0;
         for (int i = 1; i < pos.cols(); ++i) {
             scaleAvg += (pos.col(i) - pos.col(model.parent[i])).norm() /
                 (model.initialJointPos.col(i) - model.initialJointPos.col(model.parent[i])).norm();
         }
         scaleAvg /= (pos.cols() - 1.0);
-        double baseScale = (model.initialJointPos.col(SmplJoint::SPINE2) - model.initialJointPos.col(SmplJoint::ROOT_PELVIS)).norm() * (scaleAvg - 1.0);
+        float baseScale = (model.initialJointPos.col(SmplJoint::SPINE2) - model.initialJointPos.col(SmplJoint::ROOT_PELVIS)).norm() * (scaleAvg - 1.0);
 
         /** units to increase shape key 0 by to widen the avatar by approximately 1 meter */
-        const double PC1_DIST_FACT = 32.0;
+        const float PC1_DIST_FACT = 32.0;
         w[0] = baseScale * PC1_DIST_FACT;
         if (std::isnan(w[0])) w[0] = 1.5;
 
         for (int i = 1; i < pos.cols(); ++i) {
             rotTrans[i] = rotTrans[model.parent[i]];
             if (!std::isnan(pos(0, i))) {
-                Eigen::Vector3d vv = model.initialJointPos.col(i) - model.initialJointPos.col(model.parent[i]);
-                Eigen::Vector3d vvt = pos.col(i) - pos.col(model.parent[i]);
-                rotTrans[i] = Eigen::Quaterniond::FromTwoVectors(vv, vvt).toRotationMatrix();
+                Eigen::Vector3f vv = model.initialJointPos.col(i) - model.initialJointPos.col(model.parent[i]);
+                Eigen::Vector3f vvt = pos.col(i) - pos.col(model.parent[i]);
+                rotTrans[i] = Eigen::Quaternionf::FromTwoVectors(vv, vvt).toRotationMatrix();
                 r[i] = rotTrans[model.parent[i]].transpose() * rotTrans[i];
             } else {
                 r[i].setIdentity();
@@ -692,9 +692,9 @@ namespace ark {
             projectedPoints.resize(ava.model.numPoints());
             for (size_t i = 0; i < ava.cloud.cols(); ++i) {
                 const auto& pt = ava.cloud.col(i);
-                projectedPoints[i].x = static_cast<double>(pt(0))
+                projectedPoints[i].x = static_cast<float>(pt(0))
                     * intrin.fx / pt(2) + intrin.cx;
-                projectedPoints[i].y = -static_cast<double>(pt(1)) * intrin.fy / pt(2) + intrin.cy;
+                projectedPoints[i].y = -static_cast<float>(pt(1)) * intrin.fy / pt(2) + intrin.cy;
             } 
         }
         return projectedPoints;
@@ -705,9 +705,9 @@ namespace ark {
             projectedJoints.resize(ava.model.numJoints());
             for (size_t i = 0; i < ava.jointPos.cols(); ++i) {
                 const auto& pt = ava.jointPos.col(i);
-                projectedJoints[i].x = static_cast<double>(pt(0))
+                projectedJoints[i].x = static_cast<float>(pt(0))
                     * intrin.fx / pt(2) + intrin.cx;
-                projectedJoints[i].y = -static_cast<double>(pt(1)) * intrin.fy / pt(2) + intrin.cy;
+                projectedJoints[i].y = -static_cast<float>(pt(1)) * intrin.fy / pt(2) + intrin.cy;
             } 
         }
         return projectedJoints;
@@ -754,8 +754,8 @@ namespace ark {
             auto& a = ava.cloud.col(faces[i].second[0]);
             auto& b = ava.cloud.col(faces[i].second[1]);
             auto& c = ava.cloud.col(faces[i].second[2]);
-            Eigen::Vector3d ab = b-a, ac = c-a;
-            double zcross = fabs(ab.cross(ac).normalized().z());
+            Eigen::Vector3f ab = b-a, ac = c-a;
+            float zcross = fabs(ab.cross(ac).normalized().z());
             if (zcross < 0.1) {
                 paintTriangleSingleColor(renderedDepth, image_size, projected, faces[i].second, 0);
             }
@@ -780,8 +780,8 @@ namespace ark {
             auto& a = ava.cloud.col(faces[i].second[0]);
             auto& b = ava.cloud.col(faces[i].second[1]);
             auto& c = ava.cloud.col(faces[i].second[2]);
-            Eigen::Vector3d ab = b-a, ac = c-a;
-            double zcross = fabs(ab.cross(ac).normalized().z());
+            Eigen::Vector3f ab = b-a, ac = c-a;
+            float zcross = fabs(ab.cross(ac).normalized().z());
             if (zcross < 0.1) {
                 paintTriangleSingleColor<uint8_t>(partMaskMap, image_size, projected, faces[i].second, uint8_t(255));
             }
@@ -832,22 +832,22 @@ namespace ark {
         }
         metaIfs.close();
 
-        frameSize = frameSizeBytes / sizeof(double);
+        frameSize = frameSizeBytes / sizeof(float);
     }
 
     void AvatarPoseSequence::poseAvatar(Avatar& ava, size_t frame_id) const {
         if (preloaded) {
             auto frameData = data.col(frame_id);
             ava.p.noalias() = frameData.head<3>();
-            Eigen::Quaterniond q;
+            Eigen::Quaternionf q;
             for (int i = 0; i < ava.r.size(); ++i) { 
                 q.coeffs().noalias() = frameData.segment<4>(i * 4 + 3);
                 ava.r[i].noalias() = q.toRotationMatrix();
             }
         } else{
-            Eigen::VectorXd frameData = getFrame(frame_id);
+            Eigen::VectorXf frameData = getFrame(frame_id);
             ava.p = frameData.head<3>();
-            Eigen::Quaterniond q;
+            Eigen::Quaternionf q;
             for (int i = 0; i < ava.r.size(); ++i) { 
                 q.coeffs().noalias() = frameData.segment<4>(i * 4 + 3);
                 ava.r[i].noalias() = q.toRotationMatrix();
@@ -859,7 +859,7 @@ namespace ark {
         data.resize(frameSize, numFrames);
         std::ifstream ifs(sequencePath, std::ios::in | std::ios::binary);
         ifs.read(reinterpret_cast<char*>(data.data()),
-                 numFrames * frameSize * sizeof(double));
+                 numFrames * frameSize * sizeof(float));
         preloaded = true;
     }
 }

@@ -16,10 +16,10 @@ namespace ark {
     class HumanDetector;
     struct HumanAvatarUKFModel;
 
-    typedef Eigen::Matrix<double, 3, Eigen::Dynamic> CloudType;
+    typedef Eigen::Matrix<float, 3, Eigen::Dynamic> CloudType;
     typedef Eigen::Matrix<int, 3, Eigen::Dynamic> MeshType;
-    typedef Eigen::Matrix<double, 2, Eigen::Dynamic> Cloud2DType;
-    typedef Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic> MatrixType;
+    typedef Eigen::Matrix<float, 2, Eigen::Dynamic> Cloud2DType;
+    typedef Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic> MatrixType;
 
     /** Names for the various skeletal joints in the SMPL model (does not work for other models).
      *  For reference only, the avatar will work for any model and does not use this. */
@@ -73,10 +73,10 @@ namespace ark {
 
         /** Assigned weight joint index with greatest for each point, sorted by descending weight,
          *  used for part mask (num points) */
-        std::vector<std::vector<std::pair<double, int> > > assignedJoints;
+        std::vector<std::vector<std::pair<float, int> > > assignedJoints;
 
         /** List of points assigned to each joint with weight */
-        std::vector<std::vector<std::pair<double, int> > > assignedPoints;
+        std::vector<std::vector<std::pair<float, int> > > assignedPoints;
 
         /** Gaussian Mixture pose prior */
         GaussianMixture posePrior;
@@ -84,7 +84,7 @@ namespace ark {
         // Advanced data members, for advanced users only
         /** ADVANCED: Base point cloud with positions of each skin point from data file, as a vector (3 * num points).
          *  This is kept as a vector to make it easier to add keyClouds which otherwise needs to be a 3D tensor. */
-        Eigen::VectorXd baseCloud;
+        Eigen::VectorXf baseCloud;
 
         /** ADVANCED: Shape key (blendshape) data (3*num points, num keys),
          *  each column is vectorized matrix of points x1 y1 z1 x2 y2 z2 ... */
@@ -94,7 +94,7 @@ namespace ark {
         CloudType initialJointPos;
 
         /** ADVANCED: Joint regressor for recovering joint positions from surface points (num points, num joints) */
-        Eigen::SparseMatrix<double> jointRegressor;
+        Eigen::SparseMatrix<float> jointRegressor;
 
         /** ADVANCED: Whether to use the new 'joint shape regressor'
          *  to regress joints
@@ -104,17 +104,17 @@ namespace ark {
         /** ADVANCED: Affine component of joint shape regressor for
          *  recovering joint positions from shape weights directly
          *  (num joints * 3) */
-        Eigen::VectorXd jointShapeRegBase;
+        Eigen::VectorXf jointShapeRegBase;
 
         /** ADVANCED: Linear transformation component of shape regressor for
          *  recovering joint positions from shape weights directly
          *  (num joints * 3, num shapekeys) */
-        Eigen::MatrixXd jointShapeReg;
+        Eigen::MatrixXf jointShapeReg;
 
         /** ADVANCED: Assignment weights: weights for point-joints assignments.
          *  Columns are recorded in 'assignment' indices,
          *  see assignStarts below. (num assignments total, num points) */
-        Eigen::SparseMatrix<double> assignWeights;
+        Eigen::SparseMatrix<float> assignWeights;
 
         /** ADVANCED: Start index of each joint's assigned points
          *  as in rows of assignWeights (num joints + 1);
@@ -149,10 +149,10 @@ namespace ark {
         void randomMocapPose();
 
         /** Compute the avatar's SMPL pose parameters (axis-angle) */
-        Eigen::VectorXd smplParams() const;
+        Eigen::VectorXf smplParams() const;
 
         /** Get GMM pdf (likelihood) for current joint rotation parameters */
-        double pdf() const;
+        float pdf() const;
 
         /** Try to fit avatar's pose parameters, so that joints are approximately aligned to the given positions. Automatically sets joints prior to joint_pos. */
         void alignToJoints(const CloudType & joint_pos);
@@ -164,26 +164,26 @@ namespace ark {
         CloudType cloud;
 
         /** Shape-key (aka. blend shape) weights */
-        Eigen::VectorXd w;
+        Eigen::VectorXf w;
 
         /** Root position */
-        Eigen::Vector3d p;
+        Eigen::Vector3f p;
 
-        using Mat3Alloc = Eigen::aligned_allocator<Eigen::Matrix3d>; // Alligned matrix allocator
+        using Mat3Alloc = Eigen::aligned_allocator<Eigen::Matrix3f>; // Alligned matrix allocator
 
         /** The rotations, stored as 3x3 rotation matrices */
-        std::vector<Eigen::Matrix3d, Mat3Alloc> r;
+        std::vector<Eigen::Matrix3f, Mat3Alloc> r;
 
         /** Current joint positions (3, num joints) */
         CloudType jointPos;
 
         /** Current joint rotations */
-        std::vector<Eigen::Matrix3d, Mat3Alloc> jointRot;
+        std::vector<Eigen::Matrix3f, Mat3Alloc> jointRot;
 
     private:
 
         /** INTERNAL for caching use: baseCloud after applying shape keys (3 * num points) */
-        Eigen::VectorXd shapedCloudVec;
+        Eigen::VectorXf shapedCloudVec;
 
         /** INTERNAL for caching use: Position of points relative to each assigned point (3, num assignments total) */
         CloudType assignVecs;
@@ -196,8 +196,8 @@ namespace ark {
          *  By default, uses <proj-root>/data/avatar-mocap/cmu-mocap.dat */
         AvatarPoseSequence(const std::string& pose_sequence_path = "");
 
-        /** Load a frame as a raw vector of doubles */
-        Eigen::VectorXd getFrame(size_t frame_id) const;
+        /** Load a frame as a raw vector of float */
+        Eigen::VectorXf getFrame(size_t frame_id) const;
 
         /** Set the pose of the given avatar class to fit the given
          *  frame in the sequence. Assumes first three values are position,
@@ -213,14 +213,14 @@ namespace ark {
         /** Total number of frames */
         size_t numFrames;
 
-        /** Number of doubles (8 bytes) per frame */
+        /** Number of float (4 bytes) per frame */
         size_t frameSize;
 
         /** Path to sequence file */
         std::string sequencePath;
     private:
         /** Preloaded data file */
-        Eigen::MatrixXd data;
+        Eigen::MatrixXf data;
         /** Whether data is preloaded */
         bool preloaded = false;
     };
