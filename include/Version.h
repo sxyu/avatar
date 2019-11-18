@@ -15,6 +15,8 @@
 #define ARK_STRINGIFY2(X) #X
 #define ARK_STRINGIFY(X) ARK_STRINGIFY2(X)
 
+#define CAMERA_ENABLED 1
+
 // Uncomment to enable debug code
 #define ARK_DEBUG
 

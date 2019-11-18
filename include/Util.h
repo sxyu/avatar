@@ -64,7 +64,12 @@ namespace ark {
         inline void read_bin(std::istream& is, T& val) {
             is.read(reinterpret_cast<char*>(&val), sizeof(T));
         }
-    }
+
+        /** Estimate pinhole camera intrinsics from xyz_map (by solving OLS)
+         *  @return (fx, cx, fy, cy)
+         */
+        cv::Vec4d getCameraIntrinFromXYZ(const cv::Mat & xyz_map);
+    } // util
 
     // Randomization utilities
     namespace random_util {

@@ -3,6 +3,7 @@
 #include <fstream>
 #include <cstdlib>
 #include <boost/filesystem.hpp>
+#include <Eigen/Dense>
 
 namespace ark {
     namespace util {
@@ -120,7 +121,48 @@ namespace ark {
             Vec3b color = palette[color_index % (int)(sizeof palette / sizeof palette[0])];
             return bgr ? color : Vec3b(color[2], color[1], color[0]);
         }
+
+        cv::Vec4d getCameraIntrinFromXYZ(const cv::Mat & xyz_map)
+        {
+            int rows = xyz_map.rows, cols = xyz_map.cols;
+            Eigen::MatrixXd A(rows * cols, 2);
+            Eigen::MatrixXd b(rows * cols, 1);
+            cv::Vec4d result;
+
+            // fx cx
+            const cv::Vec3f * ptr;
+            for (int r = 0; r < rows; ++r) {
+                ptr = xyz_map.ptr<cv::Vec3f>(r);
+                for (int c = 0; c < cols; ++c) {
+                    const int i = r * cols + c;
+                    A(i, 0) = ptr[c][0];
+                    A(i, 1) = ptr[c][2];
+                    b(i) = c * ptr[c][2];
+                }
+            }
+
+            Eigen::Vector2d wx = A.colPivHouseholderQr().solve(b);
+            result[0] = wx[0];
+            result[1] = wx[1];
+
+            // fy cy
+            for (int r = 0; r < rows; ++r) {
+                ptr = xyz_map.ptr<cv::Vec3f>(r);
+                for (int c = 0; c < cols; ++c) {
+                    const int i = r * cols + c;
+                    A(i, 0) = ptr[c][1];
+                    A(i, 1) = ptr[c][2];
+                    b(i) = r * ptr[c][2];
+                }
+            }
+
+            Eigen::Vector2d wy = A.colPivHouseholderQr().solve(b);
+            result[2] = wy[0];
+            result[3] = wy[1];
+            return result;
+        }
     }
+
     namespace random_util {
         float uniform(float min_inc, float max_exc) {
             thread_local static std::mt19937 rg(std::random_device{}());

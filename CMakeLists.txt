@@ -6,6 +6,7 @@ endif()
 
 project( smplsynth )
 option( OPENARK_FFAST_MATH "OPENARK_FFAST_MATH" ON )
+option( BUILD_DATA_RECORDING "BUILD_DATA_RECORDING" ON )
 
 set( INCLUDE_DIR "${PROJECT_SOURCE_DIR}/include" )
 
@@ -66,6 +67,14 @@ set( EIGEN_INCLUDE_DIR ${EIGEN_INCLUDE_DIRS} )
 include_directories(${EIGEN_INCLUDE_DIRS})
 message(STATUS "Found Eigen: ${EIGEN_INCLUDE_DIRS}")
 
+# require K4A?
+set( k4a_FOUND OFF )
+find_package( k4a )
+if( k4a_FOUND)
+  message( STATUS "Found k4a (Azure Kinect SDK)" )
+endif( k4a_FOUND )
+set( _FOUND_CAMERA_LIB ON )
+
 # require OpenCV
 find_package( OpenCV REQUIRED )
 if( OpenCV_FOUND )
@@ -113,6 +122,7 @@ set(
   SOURCES
   Avatar.cpp 
   BGSubtractor.cpp 
+  DepthCamera.cpp 
   RTree.cpp 
   AvatarOptimizer.cpp
   Calibration.cpp 
@@ -131,6 +141,7 @@ set(
   ${INCLUDE_DIR}/BGSubtractor.h
   ${INCLUDE_DIR}/Calibration.h
   ${INCLUDE_DIR}/Config.h
+  ${INCLUDE_DIR}/DepthCamera.h
   ${INCLUDE_DIR}/GaussianMixture.h
   ${INCLUDE_DIR}/RTree.h
   ${INCLUDE_DIR}/SparseImage.h
@@ -139,6 +150,12 @@ set(
   ${INCLUDE_DIR}/ViconSkeleton.h
   ${INCLUDE_DIR}/nanoflann.hpp
 )
+
+if( k4a_FOUND )
+  set( SOURCES ${SOURCES} AzureKinectCamera.cpp )
+  set( HEADERS ${HEADERS} ${INCLUDE_DIR}/AzureKinectCamera.h )
+  set( DEPENDENCIES ${DEPENDENCIES} k4a::k4a )
+endif( k4a_FOUND )
 
 add_definitions(
   ${PCL_DEFINITIONS}
@@ -193,6 +210,13 @@ add_executable( rtree-run-dataset rtree-run-dataset.cpp )
 target_include_directories( rtree-run-dataset PRIVATE ${INCLUDE_DIR} )
 target_link_libraries( rtree-run-dataset ${DEPENDENCIES} ${LIB_NAME} )
 set_target_properties( rtree-run-dataset PROPERTIES COMPILE_FLAGS ${TARGET_COMPILE_FLAGS} )
+
+if( ${BUILD_DATA_RECORDING} )
+    add_executable( data-recording DataRecording.cpp )
+    target_include_directories( data-recording PRIVATE ${INCLUDE_DIR} )
+    target_link_libraries( data-recording ${DEPENDENCIES} ${LIB_NAME} )
+    set_target_properties( data-recording PROPERTIES COMPILE_FLAGS ${TARGET_COMPILE_FLAGS} )
+endif ()
 
 if ( MSVC )
     set_property(TARGET ${PROJ_NAME} APPEND PROPERTY LINK_FLAGS /DEBUG)
