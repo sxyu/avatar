@@ -1,4 +1,3 @@
-
 #include <ctime>
 #include <cstdlib>
 #include <cstdio>
@@ -31,6 +30,8 @@
 // #ifdef AZURE_KINECT_ENABLED
 #include "AzureKinectCamera.h"
 // #endif
+#include "BGSubtractor.h"
+#include "RTree.h"
 #include "Util.h"
 
 #include "opencv2/imgcodecs.hpp"
@@ -103,12 +104,12 @@ namespace {
 
 int main(int argc, char ** argv) {
     namespace po = boost::program_options;
-    std::string outPath;
     bool skipRecord;//, jointInference;
     bool forceKinect = false, forceRS2 = false;
+    std::string rtreePath;
 
     po::options_description desc("Option arguments");
-    po::options_description descPositional("OpenARK Data Recording Tool");
+    po::options_description descPositional("OpenARK Avatar Live Demo");
     po::options_description descCombined("");
     desc.add_options()
         ("help", "produce help message")
@@ -120,17 +121,14 @@ int main(int argc, char ** argv) {
 // #if defined(RSSDK2_ENABLED)
 //         ("rs2", po::bool_switch(&forceRS2), "if set, prefers librealsense2 depth cameras")
 // #endif
+        ("rtree,r", po::value<std::string>(&rtreePath)->default_value(""), "RTree model path")
     ;
 
-    descPositional.add_options()
-        ("output_path", po::value<std::string>(&outPath)->required(), "Output Path")
-        ;
     descCombined.add(descPositional);
     descCombined.add(desc);
     po::variables_map vm;
 
     po::positional_options_description posopt;
-    posopt.add("output_path", 1);
     try {
         po::store(po::command_line_parser(argc, argv).options(descCombined) 
                 .positional(posopt).run(), 
@@ -155,25 +153,18 @@ int main(int argc, char ** argv) {
         return 1;
     }
 
-	printf("CONTROLS:\nQ or ESC to stop recording,\nSPACE to start/pause"
-           "(warning: if pausing in the middle, may mess up timestamps)\n\n");
+	printf("CONTROLS:\nQ or ESC to quit\nb to set background\nSPACE to start/pause\n\n");
 
 	// seed the rng
 	srand(time(NULL));
+    ark::BGSubtractor bgsub{cv::Mat()};
 
-    using boost::filesystem::path;
-	const path directory_path(outPath);
+    ark::RTree rtree(0);
+    if (rtreePath.size()) rtree.loadFile(rtreePath);
 
-	path depth_path = directory_path / "depth_exr/";
-	path rgb_path = directory_path / "rgb/";
-	path timestamp_path = directory_path / "timestamp.txt";
-	path intrin_path = directory_path / "intrin.txt";
-	if (!boost::filesystem::exists(depth_path)) {
-		boost::filesystem::create_directories(depth_path);
-	} if (!boost::filesystem::exists(rgb_path)) {
-		boost::filesystem::create_directories(rgb_path);
-	}
-    cv::Mat lastXYZMap;
+    std::vector<std::array<int, 2> > compsBySize;
+    std::vector<int> colorid(256, 255);
+
     cv::Vec4d intrin;
     if (!skipRecord) {
         // initialize the camera
@@ -197,7 +188,6 @@ int main(int argc, char ** argv) {
 //         camera = std::make_shared<PMDCamera>();
 // #endif
 
-        std::cerr << "Starting data recording, saving to: " << directory_path.string() << "\n";
 // #ifndef AZURE_KINECT_ENABLED
         auto capture_start_time = std::chrono::high_resolution_clock::now();
 // #endif
@@ -211,7 +201,6 @@ int main(int argc, char ** argv) {
         // Pausing feature
         bool pause = true;
         std::cerr << "Note: paused, press space to begin recording.\n";
-        std::ofstream timestamp_ofs(timestamp_path.string());
 
         int currFrame = 0; // current frame number (since launch/last pause)
         while (true)
@@ -246,32 +235,47 @@ int main(int argc, char ** argv) {
                     auto ts = static_cast<AzureKinectCamera*>(camera.get())->getTimestamp();
                     if (timestamps.size() && ts - timestamps.back() < 100000) continue;
 
-                    int img_index = timestamps.size();
-                    std::stringstream ss_img_id;
-                    ss_img_id << std::setw(4) << std::setfill('0') << std::to_string(img_index);
-                    const std::string depth_img_path = (depth_path / ("depth_" + ss_img_id.str() + ".depth")).string();
-                    const std::string rgb_img_path = (rgb_path / ("rgb_" + ss_img_id.str() + ".jpg")).string();
-                    cv::Mat depth; cv::extractChannel(xyzMap, depth, 2);
-
-                    // std::cout << "Writing " << depth_img_path << std::endl;
-                    // cv::imwrite(depth_img_path, depth);
-                    writeDepth(depth_img_path, depth);
-                    // std::cout << "Writing " << rgb_img_path << std::endl;
-                    cv::imwrite(rgb_img_path, rgbMap);
-                    timestamp_ofs << ts << "\n"; // write timestamp
-
-// #ifdef AZURE_KINECT_ENABLED
-                    // timestamps from camera only supported on Azure Kinect for now
-                    timestamps.push_back(ts);
-// #else
-//                     // use system time for other cameras
-//                     auto curr_time = std::chrono::high_resolution_clock::now();
-//                     timestamps.push_back(
-//                             std::chrono::duration_cast<std::chrono::nanoseconds>(curr_time - capture_start_time).count());
-// #endif
                 }
+                cv::Mat depth;
+                cv::extractChannel(xyzMap, depth, 2);
                 // visualize
                 cv::Mat visual, rgbMapFloat;
+                if (!pause) {
+                    if (!bgsub.background.empty()) {
+                        cv::Mat sub = bgsub.run(xyzMap, &compsBySize);
+                        for (int r = 0 ; r < compsBySize.size(); ++r) {
+                            colorid[compsBySize[r][1]] = r;// > 0 ? 255 : 0;
+                        }
+                        for (int r = 0 ; r < xyzMap.rows; ++r) {
+                            auto* outptr = rgbMap.ptr<cv::Vec3b>(r);
+                            const auto* inptr = sub.ptr<uint8_t>(r);
+                            auto* dptr = depth.ptr<float>(r);
+                            for (int c = 0 ; c < xyzMap.cols; ++c) {
+                                int colorIdx = colorid[inptr[c]];
+                                if (colorIdx >= 254) {
+                                    dptr[c] = 0;
+                                    continue;
+                                }
+                                if (rtreePath.empty()) {
+                                    outptr[c] = outptr[c] / 3.0 + ark::util::paletteColor(colorIdx, true) * 2.0 / 3.0;
+                                }
+                            }
+                        }
+                    }
+
+                    if (rtreePath.size()) {
+                        cv::Mat result = rtree.predictBest(depth, std::thread::hardware_concurrency());
+                        for (int r = 0; r < depth.rows; ++r) {
+                            auto* inPtr = result.ptr<uint8_t>(r);
+                            auto* visualPtr = rgbMap.ptr<cv::Vec3b>(r);
+                            for (int c = 0; c < depth.cols; ++c){
+                                if (inPtr[c] == 255) continue;
+                                visualPtr[c] = visualPtr[c] / 3.0 + ark::util::paletteColor(inPtr[c], true) * 2.0 / 3.0;
+                            }
+                        }
+                    }
+                }
+
                 rgbMap.convertTo(rgbMapFloat, CV_32FC3, 1. / 255.);
                 cv::hconcat(xyzMap, rgbMapFloat, visual);
                 const int MAX_ROWS = 380;
@@ -280,70 +284,30 @@ int main(int argc, char ** argv) {
                 }
                 cv::imshow(camera->getModelName() + " XYZ/RGB Maps", visual);
             }
-            lastXYZMap = xyzMap;
 
             int c = cv::waitKey(1);
 
             // make case insensitive (convert to upper)
             if (c >= 'a' && c <= 'z') c &= 0xdf;
+            if (c == 'b') {
+                bgsub.background = xyzMap;
+                std::cout << "Set background.\n";
+            }
 
             // 27 is ESC
             if (c == 'Q' || c == 27) {
                 break;
             }
             else if (c == ' ') {
+                if (bgsub.background.empty()) {
+                   bgsub.background = xyzMap;
+                   std::cout << "Set background.\n";
+                }
                 pause = !pause;
             }
         }
         camera->endCapture();
         cv::destroyWindow(camera->getModelName() + " XYZ/RGB Maps");
-
-        timestamp_ofs.close();
-
-        // fit intrinsics from an XYZ map
-        intrin = util::getCameraIntrinFromXYZ(lastXYZMap);
-        // write intrinsics
-        std::ofstream intrin_ofs(intrin_path.string());
-        intrin_ofs <<
-            "fx " << intrin[0] << "\n" <<
-            "cx " << intrin[1] << "\n" <<
-            "fy " << intrin[2] << "\n" <<
-            "cy " << intrin[3] << "\n";
-        intrin_ofs.close();
-    }
-
-    // To make sure data is good, we will load it from disk rather than reusing
-	// Read in all the rgb images
-	std::vector<std::string> rgb_files;
-
-	if (is_directory(rgb_path)) {
-		boost::filesystem::directory_iterator end_iter;
-		for (boost::filesystem::directory_iterator dir_itr(rgb_path); dir_itr != end_iter; ++dir_itr) {
-			const auto& next_path = dir_itr->path().generic_string();
-			rgb_files.emplace_back(next_path);
-		}
-		std::sort(rgb_files.begin(), rgb_files.end());
-	}
-	std::vector<std::string> depth_files;
-
-	if (is_directory(depth_path)) {
-		boost::filesystem::directory_iterator end_iter;
-		for (boost::filesystem::directory_iterator dir_itr(depth_path); dir_itr != end_iter; ++dir_itr) {
-			const auto& next_path = dir_itr->path().generic_string();
-			depth_files.emplace_back(next_path);
-		}
-		std::sort(depth_files.begin(), depth_files.end());
-	}
-	ARK_ASSERT(depth_files.size() == rgb_files.size(), "Depth map and RGB map are not in sync! Possibly you output data to an already existing directory :(");
-
-    std::ifstream intrin_ifs(intrin_path.string());
-    if (intrin_ifs) {
-        // depth files are depth maps (require intrinsics to convert)
-        std::string _garbage;
-        intrin_ifs >> _garbage >> intrin[0];
-        intrin_ifs >> _garbage >> intrin[1];
-        intrin_ifs >> _garbage >> intrin[2];
-        intrin_ifs >> _garbage >> intrin[3];
     }
 
 	cv::destroyAllWindows();

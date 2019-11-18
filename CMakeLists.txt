@@ -211,6 +211,11 @@ target_include_directories( rtree-run-dataset PRIVATE ${INCLUDE_DIR} )
 target_link_libraries( rtree-run-dataset ${DEPENDENCIES} ${LIB_NAME} )
 set_target_properties( rtree-run-dataset PROPERTIES COMPILE_FLAGS ${TARGET_COMPILE_FLAGS} )
 
+add_executable( live-demo live-demo.cpp )
+target_include_directories( live-demo PRIVATE ${INCLUDE_DIR} )
+target_link_libraries( live-demo ${DEPENDENCIES} ${LIB_NAME} )
+set_target_properties( live-demo PROPERTIES COMPILE_FLAGS ${TARGET_COMPILE_FLAGS} )
+
 if( ${BUILD_DATA_RECORDING} )
     add_executable( data-recording DataRecording.cpp )
     target_include_directories( data-recording PRIVATE ${INCLUDE_DIR} )
