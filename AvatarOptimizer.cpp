@@ -1007,8 +1007,8 @@ namespace ark {
         common.numThreads = num_threads;//boost::thread::hardware_concurrency();;
         std::vector<std::vector<int> > correspondences;
 
-        auto viewer = pcl::visualization::PCLVisualizer::Ptr(new pcl::visualization::PCLVisualizer("3D Viewport"));
-        viewer->initCameraParameters();
+        // auto viewer = pcl::visualization::PCLVisualizer::Ptr(new pcl::visualization::PCLVisualizer("3D Viewport"));
+        // viewer->initCameraParameters();
 
 #ifdef TEST_COMPARE_AUTO_DIFF
         testCompareAutoDiff(*this, data_cloud, 0, 0);
@@ -1122,11 +1122,11 @@ namespace ark {
             }
             PROFILE(>> Construct problem: residual blocks);
 
-            debugVisualize(viewer, data_cloud, correspondences, pointVisible, common);
+            // debugVisualize(viewer, data_cloud, correspondences, pointVisible, common);
 
             // Run solver
             Solver::Summary summary;
-            PROFILE(>> Render in PCL);
+            // PROFILE(>> Render in PCL);
 
             ceres::Solve(options, &problem, &summary);
 
@@ -1154,7 +1154,7 @@ namespace ark {
                 std::cout << (ava.cloud.col(std::get<1>(res_tup)) - data_cloud.col(std::get<2>(res_tup))).squaredNorm() * 0.5 << "\n";
             }*/
         }
-        viewer->spin();
+        // viewer->spin();
     }
 
     void AvatarOptimizer::align(const Eigen::Matrix<double, 3, Eigen::Dynamic>& smpl_joints, int icp_iters, int num_threads) {

@@ -201,6 +201,11 @@ target_include_directories( rtree-train PRIVATE ${INCLUDE_DIR} )
 target_link_libraries( rtree-train ${DEPENDENCIES} ${LIB_NAME} )
 set_target_properties( rtree-train PROPERTIES COMPILE_FLAGS ${TARGET_COMPILE_FLAGS} )
 
+add_executable( rtree-transfer rtree-transfer.cpp )
+target_include_directories( rtree-transfer PRIVATE ${INCLUDE_DIR} )
+target_link_libraries( rtree-transfer ${DEPENDENCIES} ${LIB_NAME} )
+set_target_properties( rtree-transfer PROPERTIES COMPILE_FLAGS ${TARGET_COMPILE_FLAGS} )
+
 add_executable( rtree-run rtree-run.cpp )
 target_include_directories( rtree-run PRIVATE ${INCLUDE_DIR} )
 target_link_libraries( rtree-run ${DEPENDENCIES} ${LIB_NAME} )

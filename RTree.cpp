@@ -3013,6 +3013,97 @@ namespace ark {
         updateBestMatchTable();
     }
 
+    void RTree::trainTransfer(AvatarModel& avatar_model,
+            AvatarPoseSequence& pose_seq,
+            CameraIntrin& intrin,
+            cv::Size& image_size,
+            int num_threads,
+            bool verbose,
+            int num_images,
+            const int* part_map
+            ) {
+        
+        Eigen::Matrix<uint64_t, Eigen::Dynamic, Eigen::Dynamic> newLeafData(numParts, leafData.size());
+        newLeafData.setZero();
+        
+        {
+            AvatarDataSource dataSource(avatar_model, pose_seq, intrin, image_size, num_images, part_map);
+            std::atomic<size_t> atomicImageCnt(0);
+            std::mutex transMutex;
+            auto worker = [&]() {
+                Eigen::Matrix<uint64_t, Eigen::Dynamic, Eigen::Dynamic> threadLeafData(numParts, leafData.size());
+                threadLeafData.setZero();
+                size_t i;
+                while (true) {
+                    i = atomicImageCnt++;
+                    if (i >= num_images) break;
+                    cv::Mat depth, mask;
+                    if (i % 1000 == 999) {
+                        std::cout << "Training on images: " << i+1 << " of " << num_images << "\n" << std::flush;
+                    }
+                    dataSource.loadSimple(i, depth, mask);
+
+                    // std::vector<RTree::Vec2i, Eigen::aligned_allocator<RTree::Vec2i> > candidates;
+                    // candidates.reserve(mask.rows * mask.cols / 15);
+                    RTree::Vec2i v;
+                    for (int r = 0; r < mask.rows; ++r) {
+                        v[1] = r;
+                        auto* ptr = mask.ptr<uint8_t>(r);
+                        for (int c = 0; c < mask.cols; ++c) {
+                            if (ptr[c] != 255) {
+                                v[0] = c;
+                                // candidates.emplace_back();
+                                int nodeid = 0;
+                                while (nodes[nodeid].leafid == -1) {
+                                    auto& node = nodes[nodeid];
+                                    if (scoreByFeature(depth, v, node.u, node.v) < node.thresh) {
+                                        nodeid = nodes[nodeid].lnode;
+                                    } else {
+                                        nodeid = nodes[nodeid].rnode;
+                                    }
+                                }
+
+                                int partId = mask.at<uint8_t>(v(1), v(0));
+                                int leafId = nodes[nodeid].leafid;
+                                threadLeafData(partId, leafId) += 1;
+                            }
+                        }
+                    }
+                    // std::vector<RTree::Vec2i, Eigen::aligned_allocator<RTree::Vec2i> > chosenCandidates =
+                    //     (candidates.size() > static_cast<size_t>(num_points_per_image)) ?
+                    //     random_util::choose(candidates, num_points_per_image) : std::move(candidates);
+                    // for (auto& v : chosenCandidates) {
+                    // }
+                }
+                {
+                    std::lock_guard<std::mutex> lock(transMutex);
+                    newLeafData += threadLeafData;
+                }
+            };
+
+            std::vector<std::thread> threads;
+            for (int i = 0; i < num_threads; ++i) {
+                threads.emplace_back(worker);
+            }
+            for (int i = 0; i < num_threads; ++i) {
+                threads[i].join();
+            }
+        }
+
+        size_t zeroCnt = 0;
+        for (size_t i = 0; i < leafData.size(); ++i) {
+            uint64_t sum = newLeafData.col(i).sum();
+            if (sum > 0.0) {
+                leafData[i] = newLeafData.col(i).cast<float>() / static_cast<float>(sum);
+            } else {
+                ++zeroCnt;
+            }
+        }
+        if (zeroCnt) {
+            std::cout << "WARNING: " << zeroCnt << " leaves were unvisited, keeping old weights.\n";
+        }
+    }
+
     void RTree::updateBestMatchTable() {
         leafBestMatch.resize(leafData.size());
         for (size_t i = 0; i < leafData.size(); ++i) {

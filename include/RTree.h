@@ -119,6 +119,18 @@ namespace ark {
                    const std::string& train_partial_save_path = ""
                    );
 
+        /** Re-evaluate leaf distributions on a pre-trained trees
+         *  by sampling from simulated images */
+        void trainTransfer(AvatarModel& avatar_model,
+                   AvatarPoseSequence& pose_seq,
+                   CameraIntrin& intrin,
+                   cv::Size& image_size,
+                   int num_threads = std::thread::hardware_concurrency(),
+                   bool verbose = false,
+                   int num_images = 10000,
+                   const int* part_map = nullptr // part map
+                   );
+
         std::vector<RNode, Eigen::aligned_allocator<RNode> > nodes;
         std::vector<Distribution> leafData;
         std::vector<uint8_t> leafBestMatch;
