@@ -3,7 +3,7 @@
 #include <boost/thread.hpp>
 #include <opencv2/core.hpp>
 #include <opencv2/highgui.hpp>
-#include <pcl/visualization/pcl_visualizer.h>
+// #include <pcl/visualization/pcl_visualizer.h>
 
 #include "AvatarRenderer.h"
 #include "AvatarOptimizer.h"
@@ -147,25 +147,10 @@ int main(int argc, char** argv) {
     AvatarOptimizer optim(ava2, intrin, size);
     optim.betaPose = betaPose;
     optim.betaShape = betaShape;
+    // DISABLED since the interface has been changed
     // optim.optimize(dataCloud, iters, numThreads);
 
     ava2.update();
     
-    // auto viewer = pcl::visualization::PCLVisualizer::Ptr(new pcl::visualization::PCLVisualizer("3D Viewport"));
-    // auto cloud = ark::avatar_pcl::getCloud(ava);
-    // auto mesh2 = ark::avatar_pcl::getMesh(ava2);
-    // viewer->setBackgroundColor(0, 0, 0);
-    // viewer->addPointCloud(cloud, "cloud", 0);
-    // viewer->addPolygonMesh(*mesh2, "meshes-final",0);
-    // viewer->addCoordinateSystem(1.0);
-    // viewer->initCameraParameters();
-    // viewer->spin();
-
-    //cv::namedWindow(WIND_NAME);
-    //cv::imshow(WIND_NAME, depth);
-    //cv::imshow(WIND_NAME, depth2);
-    //cv::waitKey(0);
-    // cv::destroyAllWindows();
-
     return 0;
 }

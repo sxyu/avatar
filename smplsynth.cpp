@@ -11,7 +11,6 @@
 #include <boost/filesystem.hpp>
 
 #include <boost/smart_ptr.hpp>
-//#include <pcl/visualization/pcl_visualizer.h>
 
 #include <boost/thread.hpp>
 
@@ -244,15 +243,6 @@ int main(int argc, char** argv) {
         intrin.cx = 637.294;
         intrin.cy = 366.992;
     }
-
-    // auto viewer = boost::make_shared<pcl::visualization::PCLVisualizer>("3D Viewport");
-    // HumanAvatar ava("");
-    // auto mesh = ark::avatar_pcl::getMesh(ava);
-    // viewer->setBackgroundColor(0, 0, 0);
-    // viewer->addPolygonMesh(*mesh, "meshes",0);
-    // viewer->addCoordinateSystem(1.0);
-    // viewer->initCameraParameters();
-    // viewer->spin();
 
     run(numThreads, numToGen, outPath, size, intrin,
            startingNumber, overwrite, preload);

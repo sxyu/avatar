@@ -5,8 +5,10 @@ if(NOT CMAKE_BUILD_TYPE)
 endif()
 
 project( smplsynth )
-option( OPENARK_FFAST_MATH "OPENARK_FFAST_MATH" ON )
-option( BUILD_DATA_RECORDING "BUILD_DATA_RECORDING" ON )
+option( WITH_PCL "Enable PCL" OFF )
+option( WITH_K4A "Enable K4A (Azure Kinect); needed for demo" ON )
+option( BUILD_RTREE_TOOLS "Build random forest tools" ON )
+option( OPENARK_FFAST_MATH "Enable ffast-math compiler flag, may cause numerical problems" ON )
 
 set( INCLUDE_DIR "${PROJECT_SOURCE_DIR}/include" )
 
@@ -51,9 +53,6 @@ elseif( MSVC )
     endif()
 endif ( )
 
-set( Boost_USE_STATIC_LIBS ON )
-set( Boost_USE_STATIC ON )
-
 if( NOT DEFINED EIGEN_INCLUDE_DIRS )
     if ( DEFINED Eigen_DIR )
         set( EIGEN_INCLUDE_DIRS ${Eigen_DIR} )
@@ -68,11 +67,17 @@ message(STATUS "Found Eigen: ${EIGEN_INCLUDE_DIRS}")
 
 # require K4A?
 set( k4a_FOUND OFF )
-find_package( k4a )
-if( k4a_FOUND)
-  message( STATUS "Found k4a (Azure Kinect SDK)" )
-endif( k4a_FOUND )
-set( _FOUND_CAMERA_LIB ON )
+if ( ${WITH_K4A} )
+    find_package( k4a )
+    if( k4a_FOUND)
+      message( STATUS "Found k4a (Azure Kinect SDK)" )
+    else()
+      message( STATUS "k4a (Azure Kinect SDK) not found, live demo, etc disabled" )
+    endif( k4a_FOUND )
+    set( _FOUND_CAMERA_LIB ON )
+else()
+    message( STATUS "K4A (Azure Kinect SDK) disabled, configure with -DWITH_K4A=ON to enable" )
+endif ()
 
 # require OpenCV
 find_package( OpenCV REQUIRED )
@@ -80,13 +85,23 @@ if( OpenCV_FOUND )
    message( STATUS "Found OpenCV: ${OpenCV_INCLUDE_DIRS}" )
 endif( OpenCV_FOUND )
 
-# require PCL
-find_package( PCL REQUIRED )
-if( PCL_FOUND )
-   message( STATUS "Found PCL: ${PCL_INCLUDE_DIRS}" )
-endif( PCL_FOUND )
+set( PCL_FOUND OFF )
+if ( ${WITH_PCL} )
+    # Find PCL
+    find_package( PCL )
+    if( PCL_FOUND )
+        message( STATUS "Found PCL: ${PCL_INCLUDE_DIRS}" )
+    else()
+        message( WARNING "PCL not found, disabling AvatarPCL functions" )
+    endif( PCL_FOUND )
+else()
+    message( STATUS "PCL disabled, configure with -DWITH_PCL=ON to enable" )
+endif ()
 
-find_package( Boost REQUIRED COMPONENTS system program_options )
+# require Boost
+set( Boost_USE_STATIC_LIBS ON )
+set( Boost_USE_STATIC ON )
+find_package( Boost REQUIRED COMPONENTS filesystem program_options thread system )
 
 # require Ceres
 find_package( Ceres REQUIRED )
@@ -134,7 +149,6 @@ set(
 set(
   HEADERS
   ${INCLUDE_DIR}/Avatar.h
-  ${INCLUDE_DIR}/AvatarPCL.h
   ${INCLUDE_DIR}/AvatarRenderer.h
   ${INCLUDE_DIR}/AvatarOptimizer.h
   ${INCLUDE_DIR}/BGSubtractor.h
@@ -145,83 +159,119 @@ set(
   ${INCLUDE_DIR}/RTree.h
   ${INCLUDE_DIR}/SparseImage.h
   ${INCLUDE_DIR}/Util.h
-  ${INCLUDE_DIR}/Version.h
   ${INCLUDE_DIR}/ViconSkeleton.h
   ${INCLUDE_DIR}/nanoflann.hpp
 )
 
-if( k4a_FOUND )
+#  Set up configs
+if( NOT k4a_FOUND )
+  set( _AZURE_KINECT_SDK_ "//" )
+else()
   set( SOURCES ${SOURCES} AzureKinectCamera.cpp )
   set( HEADERS ${HEADERS} ${INCLUDE_DIR}/AzureKinectCamera.h )
   set( DEPENDENCIES ${DEPENDENCIES} k4a::k4a )
-endif( k4a_FOUND )
+endif( NOT k4a_FOUND )
 
-add_definitions(
-  ${PCL_DEFINITIONS}
-)
-foreach( DEFINITION ${PCL_DEFINITIONS} )
-  set( TARGET_COMPILE_FLAGS "${TARGET_COMPILE_FLAGS} ${DEFINITION}" )
-endforeach()
+if ( NOT PCL_FOUND )
+    set( _WITH_PCL_ "//" )
+else()
+    set( SOURCES ${SOURCES} AvatarPCL.cpp )
+    set( HEADERS ${HEADERS} ${INCLUDE_DIR}/AvatarPCL.h )
+
+    add_definitions(
+        ${PCL_DEFINITIONS}
+        )
+    foreach( DEFINITION ${PCL_DEFINITIONS} )
+        set( TARGET_COMPILE_FLAGS "${TARGET_COMPILE_FLAGS} ${DEFINITION}" )
+    endforeach()
+endif ()
+
+configure_file( Version.h.in ${INCLUDE_DIR}/Version.h )
+set( HEADERS ${HEADERS} ${INCLUDE_DIR}/Version.h )
 
 add_library( ${LIB_NAME} STATIC ${SOURCES} ${HEADERS} )
 set_target_properties( ${LIB_NAME} PROPERTIES OUTPUT_NAME ${OUTPUT_NAME} )
 target_link_libraries( ${LIB_NAME} ${DEPENDENCIES} )
-set_target_properties( ${LIB_NAME} PROPERTIES COMPILE_FLAGS ${TARGET_COMPILE_FLAGS} )
+if ( PCL_FOUND )
+    set_target_properties( ${LIB_NAME} PROPERTIES COMPILE_FLAGS ${TARGET_COMPILE_FLAGS} )
+endif()
 
 add_executable( ${SYNTH_NAME} smplsynth.cpp )
 target_include_directories( ${SYNTH_NAME} PRIVATE ${INCLUDE_DIR} )
 set_target_properties( ${SYNTH_NAME} PROPERTIES OUTPUT_NAME ${OUTPUT_NAME} )
 target_link_libraries( ${SYNTH_NAME} ${DEPENDENCIES} ${LIB_NAME} )
-set_target_properties( ${SYNTH_NAME} PROPERTIES COMPILE_FLAGS ${TARGET_COMPILE_FLAGS} )
+if ( PCL_FOUND )
+    set_target_properties( ${SYNTH_NAME} PROPERTIES COMPILE_FLAGS ${TARGET_COMPILE_FLAGS} )
+endif()
 
-add_executable( scratch scratch.cpp )
-target_include_directories( scratch PRIVATE ${INCLUDE_DIR} )
-target_link_libraries( scratch ${DEPENDENCIES} ${LIB_NAME} )
-set_target_properties( scratch PROPERTIES COMPILE_FLAGS ${TARGET_COMPILE_FLAGS} )
+if( PCL_FOUND )
+    add_executable( scratch scratch.cpp )
+    target_include_directories( scratch PRIVATE ${INCLUDE_DIR} )
+    target_link_libraries( scratch ${DEPENDENCIES} ${LIB_NAME} )
+    set_target_properties( scratch PROPERTIES COMPILE_FLAGS ${TARGET_COMPILE_FLAGS} )
+endif()
 
 add_executable( bgsubtract bgsubtract.cpp )
 target_include_directories( bgsubtract PRIVATE ${INCLUDE_DIR} )
 target_link_libraries( bgsubtract ${DEPENDENCIES} ${LIB_NAME} )
-set_target_properties( bgsubtract PROPERTIES COMPILE_FLAGS ${TARGET_COMPILE_FLAGS} )
+if ( PCL_FOUND )
+    set_target_properties( bgsubtract PROPERTIES COMPILE_FLAGS ${TARGET_COMPILE_FLAGS} )
+endif()
 
 add_executable( smpltrim smpltrim.cpp )
 target_include_directories( smpltrim PRIVATE ${INCLUDE_DIR} )
 target_link_libraries( smpltrim ${DEPENDENCIES} ${LIB_NAME} )
-set_target_properties( smpltrim PROPERTIES COMPILE_FLAGS ${TARGET_COMPILE_FLAGS} )
+if ( PCL_FOUND )
+    set_target_properties( smpltrim PROPERTIES COMPILE_FLAGS ${TARGET_COMPILE_FLAGS} )
+endif()
 
-# RTree stuff (not well tested)
-add_executable( rtree-train rtree-train.cpp )
-target_include_directories( rtree-train PRIVATE ${INCLUDE_DIR} )
-target_link_libraries( rtree-train ${DEPENDENCIES} ${LIB_NAME} )
-set_target_properties( rtree-train PROPERTIES COMPILE_FLAGS ${TARGET_COMPILE_FLAGS} )
+# RTree stuff
+if ( ${BUILD_RTREE_TOOLS} )
+    add_executable( rtree-train rtree-train.cpp )
+    target_include_directories( rtree-train PRIVATE ${INCLUDE_DIR} )
+    target_link_libraries( rtree-train ${DEPENDENCIES} ${LIB_NAME} )
+    if ( PCL_FOUND )
+        set_target_properties( rtree-train PROPERTIES COMPILE_FLAGS ${TARGET_COMPILE_FLAGS} )
+    endif()
 
-add_executable( rtree-transfer rtree-transfer.cpp )
-target_include_directories( rtree-transfer PRIVATE ${INCLUDE_DIR} )
-target_link_libraries( rtree-transfer ${DEPENDENCIES} ${LIB_NAME} )
-set_target_properties( rtree-transfer PROPERTIES COMPILE_FLAGS ${TARGET_COMPILE_FLAGS} )
+    add_executable( rtree-transfer rtree-transfer.cpp )
+    target_include_directories( rtree-transfer PRIVATE ${INCLUDE_DIR} )
+    target_link_libraries( rtree-transfer ${DEPENDENCIES} ${LIB_NAME} )
+    if ( PCL_FOUND )
+        set_target_properties( rtree-transfer PROPERTIES COMPILE_FLAGS ${TARGET_COMPILE_FLAGS} )
+    endif()
 
-add_executable( rtree-run rtree-run.cpp )
-target_include_directories( rtree-run PRIVATE ${INCLUDE_DIR} )
-target_link_libraries( rtree-run ${DEPENDENCIES} ${LIB_NAME} )
-set_target_properties( rtree-run PROPERTIES COMPILE_FLAGS ${TARGET_COMPILE_FLAGS} )
+    add_executable( rtree-run rtree-run.cpp )
+    target_include_directories( rtree-run PRIVATE ${INCLUDE_DIR} )
+    target_link_libraries( rtree-run ${DEPENDENCIES} ${LIB_NAME} )
+    if ( PCL_FOUND )
+        set_target_properties( rtree-run PROPERTIES COMPILE_FLAGS ${TARGET_COMPILE_FLAGS} )
+    endif()
 
-add_executable( rtree-run-dataset rtree-run-dataset.cpp )
-target_include_directories( rtree-run-dataset PRIVATE ${INCLUDE_DIR} )
-target_link_libraries( rtree-run-dataset ${DEPENDENCIES} ${LIB_NAME} )
-set_target_properties( rtree-run-dataset PROPERTIES COMPILE_FLAGS ${TARGET_COMPILE_FLAGS} )
+    add_executable( rtree-run-dataset rtree-run-dataset.cpp )
+    target_include_directories( rtree-run-dataset PRIVATE ${INCLUDE_DIR} )
+    target_link_libraries( rtree-run-dataset ${DEPENDENCIES} ${LIB_NAME} )
+    if ( PCL_FOUND )
+        set_target_properties( rtree-run-dataset PROPERTIES COMPILE_FLAGS ${TARGET_COMPILE_FLAGS} )
+    endif()
+endif ()
 
 if ( k4a_FOUND )
     add_executable( live-demo live-demo.cpp )
     target_include_directories( live-demo PRIVATE ${INCLUDE_DIR} )
     target_link_libraries( live-demo ${DEPENDENCIES} ${LIB_NAME} )
-    set_target_properties( live-demo PROPERTIES COMPILE_FLAGS ${TARGET_COMPILE_FLAGS} )
+    if ( PCL_FOUND )
+        set_target_properties( live-demo PROPERTIES COMPILE_FLAGS ${TARGET_COMPILE_FLAGS} )
+    endif()
 endif ()
 
-if( ${BUILD_DATA_RECORDING} AND k4a_FOUND )
+if( ${WITH_K4A} AND k4a_FOUND )
     add_executable( data-recording DataRecording.cpp )
     target_include_directories( data-recording PRIVATE ${INCLUDE_DIR} )
     target_link_libraries( data-recording ${DEPENDENCIES} ${LIB_NAME} )
-    set_target_properties( data-recording PROPERTIES COMPILE_FLAGS ${TARGET_COMPILE_FLAGS} )
+    if ( PCL_FOUND )
+        set_target_properties( data-recording PROPERTIES COMPILE_FLAGS ${TARGET_COMPILE_FLAGS} )
+    endif()
 endif ()
 
 if ( MSVC )

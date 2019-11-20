@@ -1,24 +1,17 @@
 #pragma once
 
-#define AZURE_KINECT_ENABLED
-#define OPENARK_CAMERA_TYPE "azurekinect"
-//#define RSSDK2_ENABLED
-//#define OPENARK_CAMERA_TYPE "realsense"
-//#define RSSDK_ENABLED
-//#define OPENARK_CAMERA_TYPE "sr300"
-//#define PMDSDK_ENABLED
-//#define OPENARK_CAMERA_TYPE "pmd" 
+@_AZURE_KINECT_SDK_@#define AZURE_KINECT_ENABLED
+@_AZURE_KINECT_SDK_@#define OPENARK_CAMERA_TYPE "azurekinect"
+@_WITH_PCL_@#define OPENARK_PCL_ENABLED
 
-#define OPENARK_VERSION_MAJOR 0
-#define OPENARK_VERSION_MINOR 9
-#define OPENARK_VERSION_PATCH 4
+#define OPENARK_VERSION_MAJOR @OpenARK_VERSION_MAJOR@
+#define OPENARK_VERSION_MINOR @OpenARK_VERSION_MINOR@
+#define OPENARK_VERSION_PATCH @OpenARK_VERSION_PATCH@
 #define ARK_STRINGIFY2(X) #X
 #define ARK_STRINGIFY(X) ARK_STRINGIFY2(X)
 
-#define CAMERA_ENABLED 1
-
 // Uncomment to enable debug code
-#define ARK_DEBUG
+@_DEBUG_@#define DEBUG
 
 // Constants
 #ifndef M_PI

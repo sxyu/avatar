@@ -9,9 +9,7 @@
 #include <nanoflann.hpp>
 #include <boost/thread.hpp>
 
-#include <pcl/visualization/pcl_visualizer.h>
-#include "AvatarPCL.h"
-
+#include "Version.h"
 #include "Avatar.h"
 #include "AvatarRenderer.h"
 #include "Util.h"
@@ -775,93 +773,6 @@ namespace ark {
             }
         }
 
-        // void debugVisualize(const pcl::visualization::PCLVisualizer::Ptr& viewer,
-        //         const CloudType& data_cloud, std::vector<std::vector<int> > correspondences,
-        //        const std::vector<bool>& point_visible, AvatarEvaluationCommonData<AvatarCostFunctorCache>& common) {
-        //     auto modelPclCloud = pcl::PointCloud<pcl::PointXYZRGBA>::Ptr(new pcl::PointCloud<pcl::PointXYZRGBA>());
-        //     auto dataPclCloud = pcl::PointCloud<pcl::PointXYZRGBA>::Ptr(new pcl::PointCloud<pcl::PointXYZRGBA>());
-        //     // auto matchedModelPointsCloud = pcl::PointCloud<pcl::PointXYZRGBA>::Ptr(new pcl::PointCloud<pcl::PointXYZRGBA>());
-        //     modelPclCloud->reserve(common.ava.cloud.cols());
-        //     for (int i = 0 ; i < common.ava.cloud.cols(); ++i) {
-        //         pcl::PointXYZRGBA pt;
-        //         pt.getVector3fMap() = common.ava.cloud.col(i).cast<float>();
-        //         if (!point_visible[i]) {
-        //             pt.r = pt.g = pt.b = 100;
-        //         }  else {
-        //             pt.r = 255;
-        //             pt.g = 0;
-        //             pt.b = 0;
-        //         }
-        //         pt.a = 255;
-        //         modelPclCloud->push_back(std::move(pt));
-        //     }
-        //     dataPclCloud->reserve(data_cloud.cols());
-        //     for (int i = 0 ; i < data_cloud.cols(); ++i) {
-        //         pcl::PointXYZRGBA pt;
-        //         pt.getVector3fMap() = data_cloud.col(i).cast<float>();
-        //         pt.r = 100;
-        //         pt.g = 100;
-        //         pt.b = 100;
-        //         pt.a = 200;
-        //         dataPclCloud->push_back(std::move(pt));
-        //     }
-        //     // matchedModelPointsCloud->reserve(common.caches.size());
-        //     // common.PrepareForEvaluation(true, true);
-        //     // for (auto& cache : common.caches) {
-        //     //     cache.updateData(false);
-        //     //     pcl::PointXYZRGBA pt;
-        //     //     pt.getVector3fMap() = cache.resid.cast<float>();
-        //     //     pt.r = 0;
-        //     //     pt.g = 255;
-        //     //     pt.b = 0;
-        //     //     pt.a = 255;
-        //     //     matchedModelPointsCloud->push_back(std::move(pt));
-        //     // }
-        //
-        //     viewer->setBackgroundColor(0, 0, 0);
-        //     viewer->removePointCloud("cloud");
-        //     viewer->removePointCloud("cloudData");
-        //     viewer->removePointCloud("cachesCloud");
-        //     viewer->removeAllShapes();
-        //     viewer->addPointCloud(modelPclCloud, "cloud", 0);
-        //     viewer->addPointCloud(dataPclCloud, "cloudData", 0);
-        //     // viewer->addPointCloud(matchedModelPointsCloud, "cachesCloud", 0);
-        //     [>
-        //     for (int i = 0; i < common.ava.model.numJoints(); ++i) {
-        //         pcl::PointXYZRGBA curr;
-        //         curr.x = common.jointPosInit(0, i);
-        //         curr.y = common.jointPosInit(1, i);
-        //         curr.z = common.jointPosInit(2, i);
-        //         //std::cerr << "Joint:" << joints[i]->name << ":" << curr.x << "," << curr.y << "," << curr.z << "\n";
-        //
-        //         cv::Vec3f colorf(0.f, 0.f, 1.0f);
-        //         std::string jointName = "avatarJoint" + std::to_string(i);
-        //         viewer->removeShape(jointName, 0);
-        //         viewer->addSphere(curr, 0.02, colorf[0], colorf[1], colorf[2], jointName, 0);
-        //
-        //         // if (joints[i]->parent) {
-        //         //     p parent = util::toPCLPoint(joints[i]->parent->posTransformed);
-        //         //     std::string boneName = pcl_prefix + "avatarBone" + std::to_string(i);
-        //         //     viewer->removeShape(boneName, viewport);
-        //         //     viewer->addLine(curr, parent, colorf[2], colorf[1], colorf[0], boneName, viewport);
-        //         // }
-        //     }
-        //     */
-        //
-        //     // for (size_t i = 0; i < correspondences.size(); ++i) {
-        //     //     for (size_t j = 0; j < correspondences[i].size(); ++j) {
-        //     //         if (random_util::uniform(0.0, 1.0) > 0.05) continue;
-        //     //         pcl::PointXYZ p1, p2;
-        //     //         p1.getVector3fMap() = common.ava.cloud.col(i).cast<float>();
-        //     //         p2.getVector3fMap() = data_cloud.col(correspondences[i][j]).cast<float>();
-        //     //         std::string name = "nn_line_" + std::to_string(i) +"_" + std::to_string(correspondences[i][j]);
-        //     //         viewer->addLine<pcl::PointXYZ, pcl::PointXYZ>(p2, p1, 1.0, 0.0, 0.0, name, 0);
-        //     //     }
-        //     // }
-        //
-        //     viewer->spin();
-        // }
-
 #ifdef TEST_COMPARE_AUTO_DIFF
         /** Given a model point-data point pair, this function checks that autodiff gives the same result
          *  as the user-supplied analytic derivatives. Useful for verifying correctness. */
@@ -1010,9 +921,6 @@ namespace ark {
         AvatarEvaluationCommonData<AvatarCostFunctorCache> common(*this, true);
         common.numThreads = num_threads;//boost::thread::hardware_concurrency();;
         std::vector<std::vector<int> > correspondences;
-
-        // auto viewer = pcl::visualization::PCLVisualizer::Ptr(new pcl::visualization::PCLVisualizer("3D Viewport"));
-        // viewer->initCameraParameters();
 
 #ifdef TEST_COMPARE_AUTO_DIFF
         testCompareAutoDiff(*this, data_cloud, 0, 0);
@@ -1170,8 +1078,6 @@ namespace ark {
             }
             PROFILE(>> Construct problem: residual blocks);
 
-            // debugVisualize(viewer, data_cloud, correspondences, pointVisible, common);
-
             // Run solver
             Solver::Summary summary;
             // PROFILE(>> Render in PCL);
@@ -1202,6 +1108,5 @@ namespace ark {
                 std::cout << (ava.cloud.col(std::get<1>(res_tup)) - data_cloud.col(std::get<2>(res_tup))).squaredNorm() * 0.5 << "\n";
             }*/
         }
-        // viewer->spin();
     }
 }

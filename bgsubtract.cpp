@@ -8,7 +8,6 @@
 #include <opencv2/highgui.hpp>
 #include <boost/program_options.hpp>
 #include <boost/filesystem.hpp>
-#include <pcl/visualization/pcl_visualizer.h>
 
 #include "Avatar.h"
 #include "AvatarOptimizer.h"
@@ -103,9 +102,6 @@ int main(int argc, char** argv) {
 
     ark::RTree rtree(0);
     if (rtreePath.size()) rtree.loadFile(rtreePath);
-
-    // auto viewer = pcl::visualization::PCLVisualizer::Ptr(new pcl::visualization::PCLVisualizer("3D Viewport"));
-    // viewer->initCameraParameters();
 
     bool reinit = true;
 

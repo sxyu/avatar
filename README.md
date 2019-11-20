@@ -9,11 +9,13 @@ A smaller reimplementation of OpenARK Avatar using only analytic derivatives.
 ## Building
 
 ### Dependencies
-- OpenCV 3
-- PCL 1.8+ (and its dependencies; may remove this later since not used much)
-- Eigen 3.4
-- Ceres Solver
-- K4a (Azure Kinect SDK), optional
+- Boost 1.58
+- OpenCV 3.3+ (OpenCV 4 not supported)
+- Eigen 3.3.4
+- Ceres Solver 1.14 (Ceres 2 not supported)
+- K4A (Azure Kinect SDK), optional but required for live-demo
+- PCL 1.8+, optional
+Earlier versions of these libraries may work, but I have not tested them
 
 ### How to build
 
@@ -24,7 +26,7 @@ mkdir build && cd build
 cmake .. -DCMAKE_BUILD_TYPE=Release
 make -j4
 ```
-Replace `4` with an appropriate number of threads.
+Replace `4` with an appropriate number of threads. Add `-DWITH_PCL=ON` to enable PCL, add `-DWITH_K4A=OFF` to disable looking for Azure Kinect SDK, add `-DBUILD_RTREE_TOOLS=OFF` to disable building RTree tools such as rtree-train, rtree-run-dataset.
 
 ### Outputs
 
