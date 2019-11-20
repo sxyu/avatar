@@ -36,66 +36,6 @@
 
 using namespace ark;
 
-namespace {
-    void readDepth(const std::string & path, cv::Mat & m) {
-        std::ifstream ifs(path, std::ios::binary | std::ios::in);
-
-        ushort wid, hi;
-        util::read_bin(ifs, hi);
-        util::read_bin(ifs, wid);
-
-        m = cv::Mat::zeros(hi, wid, CV_32FC1);
-
-        int zr = 0;
-        for (int i = 0; i < hi; ++i) {
-            float * ptr = m.ptr<float>(i);
-            for (int j = 0; j < wid; ++j) {
-                if (zr) --zr;
-                else {
-                    if (!ifs) break;
-                    float x; util::read_bin(ifs, x);
-                    if (x <= 1) {
-                        ptr[j] = x;
-                    }
-                    else {
-                        zr = (int)(-x) - 1;
-                    }
-                }
-            }
-        }
-    }
-    void writeDepth(const std::string & image_path, cv::Mat & depth_map) {
-        std::ofstream ofsd(image_path, std::ios::binary | std::ios::out);
-
-        if (ofsd) {
-            util::write_bin(ofsd, (ushort)depth_map.rows);
-            util::write_bin(ofsd, (ushort)depth_map.cols);
-
-            int zrun = 0;
-            for (int i = 0; i < depth_map.rows; ++i)
-            {
-                const float * ptr = depth_map.ptr<float>(i);
-                for (int j = 0; j < depth_map.cols; ++j)
-                {
-                    if (ptr[j] == 0) {
-                        ++zrun;
-                        continue;
-                    }
-                    else {
-                        if (zrun >= 1) {
-                            util::write_bin(ofsd, (float)(-zrun));
-                        }
-                        zrun = 0;
-                        util::write_bin(ofsd, ptr[j]);// util::write_bin(ofsd, ptr[j][1]); writeBinary(ofsd, ptr[j][2]);
-                    }
-                }
-            }
-
-            ofsd.close();
-        }
-    }
-}
-
 int main(int argc, char ** argv) {
     namespace po = boost::program_options;
     /** Number of body parts from part map, used in rtree, etc. */
