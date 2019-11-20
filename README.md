@@ -12,9 +12,13 @@ A smaller reimplementation of OpenARK Avatar using only analytic derivatives.
 - Boost 1.58
 - OpenCV 3.3+ (OpenCV 4 not supported)
 - Eigen 3.3.4
-- Ceres Solver 1.14 (Ceres 2 not supported)
+- Ceres Solver 1.14 (Ceres 2 not supported).
+    - This is very performance critical, and it is strongly recommended to manually build Ceres with LAPACK and OpenMP support.   
+    - If you are using an Intel processor, it is also recommended to use MKL as BLAS/LAPACK. Otherwise ATLAS is recommended.
+    - Finally, make sure you build Ceres in release mode.
 - K4A (Azure Kinect SDK), optional but required for live-demo
 - PCL 1.8+, optional
+
 Earlier versions of these libraries may work, but I have not tested them
 
 ### How to build
@@ -27,6 +31,8 @@ cmake .. -DCMAKE_BUILD_TYPE=Release
 make -j4
 ```
 Replace `4` with an appropriate number of threads. Add `-DWITH_PCL=ON` to enable PCL, add `-DWITH_K4A=OFF` to disable looking for Azure Kinect SDK, add `-DBUILD_RTREE_TOOLS=OFF` to disable building RTree tools such as rtree-train, rtree-run-dataset.
+
+For unknown reasons, sometimes I encounter linker errors when not manually linking OpenMP. If this happens configure with `-DWITH_OMP=ON`.
 
 ### Outputs
 
