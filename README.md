@@ -1,5 +1,9 @@
 ## OpenARK Avatar Development Project
 
+![Pipeline](https://raw.githubusercontent.com/sxyu/smplsynth/master/images/pipeline.png)
+
+![Demo Screenshot (Quite Old)](https://raw.githubusercontent.com/sxyu/smplsynth/master/images/result.png)
+
 A smaller reimplementation of OpenARK Avatar using only analytic derivatives.
 
 ## Building
