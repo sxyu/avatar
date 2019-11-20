@@ -147,7 +147,7 @@ int main(int argc, char** argv) {
     AvatarOptimizer optim(ava2, intrin, size);
     optim.betaPose = betaPose;
     optim.betaShape = betaShape;
-    optim.optimize(dataCloud, iters, numThreads);
+    // optim.optimize(dataCloud, iters, numThreads);
 
     ava2.update();
     

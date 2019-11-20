@@ -697,10 +697,13 @@ namespace ark {
             CloudType, 3, nanoflann::metric_L2_Simple> KdTree;
         void findNN(const CloudType & data_cloud,
             const CloudType & model_cloud,
+            const Eigen::VectorXi& model_part_labels,
             std::vector<bool>& point_visible,
             std::vector<std::vector<int> > & correspondences,
-            bool invert = false,
-            KdTree * kd_tree = nullptr) {
+            std::vector<Eigen::VectorXi>& part_indices,
+            std::vector<std::unique_ptr<KdTree>>& part_kd,
+            int nn_step,
+            bool invert = false) {
 
             if (invert) {
                 size_t index; double dist;
@@ -737,26 +740,24 @@ namespace ark {
                 nanoflann::KNNResultSet<double> resultSet(1);
 
                 // match each model point to a data point
-                bool ownTree = kd_tree == nullptr;
-                if (ownTree) {
-                    kd_tree = new KdTree(data_cloud, 10);
-                    kd_tree->index->buildIndex();
-                }
-
                 correspondences.resize(model_cloud.cols());
                 for (int i = 0; i < model_cloud.cols(); ++i) {
                     correspondences[i].clear();
                 }
-                for (int i = 0; i < model_cloud.cols(); ++i) {
+                for (int i = 0; i < model_cloud.cols(); i += nn_step) {
                     if (!point_visible[i]) continue;
                     resultSet.init(&index, &dist);
-                    kd_tree->index->findNeighbors(resultSet, model_cloud.data() + i * 3, nanoflann::SearchParams(10));
-                    correspondences[i].push_back(index);
+                    int partId = model_part_labels[i];
+                    auto* kd_tree = part_kd[partId].get();
+                    if (kd_tree) {
+                        kd_tree->index->findNeighbors(resultSet, model_cloud.data() + i * 3, nanoflann::SearchParams(10));
+                        correspondences[i].push_back(part_indices[partId][index]);
+                    }
                 }
 
-                if (ownTree) {
-                    delete kd_tree;
-                }
+                // if (ownTree) {
+                //     delete kd_tree;
+                // }
                 /*
                    const int MAX_CORRES_PER_POINT = 200;
                    for (int i = 0; i < model_cloud.cols(); ++i) {
@@ -774,92 +775,92 @@ namespace ark {
             }
         }
 
-        void debugVisualize(const pcl::visualization::PCLVisualizer::Ptr& viewer,
-                const CloudType& data_cloud, std::vector<std::vector<int> > correspondences,
-               const std::vector<bool>& point_visible, AvatarEvaluationCommonData<AvatarCostFunctorCache>& common) {
-            auto modelPclCloud = pcl::PointCloud<pcl::PointXYZRGBA>::Ptr(new pcl::PointCloud<pcl::PointXYZRGBA>());
-            auto dataPclCloud = pcl::PointCloud<pcl::PointXYZRGBA>::Ptr(new pcl::PointCloud<pcl::PointXYZRGBA>());
-            // auto matchedModelPointsCloud = pcl::PointCloud<pcl::PointXYZRGBA>::Ptr(new pcl::PointCloud<pcl::PointXYZRGBA>());
-            modelPclCloud->reserve(common.ava.cloud.cols());
-            for (int i = 0 ; i < common.ava.cloud.cols(); ++i) {
-                pcl::PointXYZRGBA pt;
-                pt.getVector3fMap() = common.ava.cloud.col(i).cast<float>();
-                if (!point_visible[i]) {
-                    pt.r = pt.g = pt.b = 100;
-                }  else {
-                    pt.r = 255;
-                    pt.g = 0;
-                    pt.b = 0;
-                }
-                pt.a = 255;
-                modelPclCloud->push_back(std::move(pt));
-            }
-            dataPclCloud->reserve(data_cloud.cols());
-            for (int i = 0 ; i < data_cloud.cols(); ++i) {
-                pcl::PointXYZRGBA pt;
-                pt.getVector3fMap() = data_cloud.col(i).cast<float>();
-                pt.r = 100;
-                pt.g = 100;
-                pt.b = 100;
-                pt.a = 200;
-                dataPclCloud->push_back(std::move(pt));
-            }
-            // matchedModelPointsCloud->reserve(common.caches.size());
-            // common.PrepareForEvaluation(true, true);
-            // for (auto& cache : common.caches) {
-            //     cache.updateData(false);
-            //     pcl::PointXYZRGBA pt;
-            //     pt.getVector3fMap() = cache.resid.cast<float>();
-            //     pt.r = 0;
-            //     pt.g = 255;
-            //     pt.b = 0;
-            //     pt.a = 255;
-            //     matchedModelPointsCloud->push_back(std::move(pt));
-            // }
-
-            viewer->setBackgroundColor(0, 0, 0);
-            viewer->removePointCloud("cloud");
-            viewer->removePointCloud("cloudData");
-            viewer->removePointCloud("cachesCloud");
-            viewer->removeAllShapes();
-            viewer->addPointCloud(modelPclCloud, "cloud", 0);
-            viewer->addPointCloud(dataPclCloud, "cloudData", 0);
-            // viewer->addPointCloud(matchedModelPointsCloud, "cachesCloud", 0);
-            /*
-            for (int i = 0; i < common.ava.model.numJoints(); ++i) {
-                pcl::PointXYZRGBA curr;
-                curr.x = common.jointPosInit(0, i);
-                curr.y = common.jointPosInit(1, i);
-                curr.z = common.jointPosInit(2, i);
-                //std::cerr << "Joint:" << joints[i]->name << ":" << curr.x << "," << curr.y << "," << curr.z << "\n";
-
-                cv::Vec3f colorf(0.f, 0.f, 1.0f);
-                std::string jointName = "avatarJoint" + std::to_string(i);
-                viewer->removeShape(jointName, 0);
-                viewer->addSphere(curr, 0.02, colorf[0], colorf[1], colorf[2], jointName, 0);
-
-                // if (joints[i]->parent) {
-                //     p parent = util::toPCLPoint(joints[i]->parent->posTransformed);
-                //     std::string boneName = pcl_prefix + "avatarBone" + std::to_string(i);
-                //     viewer->removeShape(boneName, viewport);
-                //     viewer->addLine(curr, parent, colorf[2], colorf[1], colorf[0], boneName, viewport);
-                // }
-            }
-            */
-
-            // for (size_t i = 0; i < correspondences.size(); ++i) {
-            //     for (size_t j = 0; j < correspondences[i].size(); ++j) {
-            //         if (random_util::uniform(0.0, 1.0) > 0.05) continue;
-            //         pcl::PointXYZ p1, p2;
-            //         p1.getVector3fMap() = common.ava.cloud.col(i).cast<float>();
-            //         p2.getVector3fMap() = data_cloud.col(correspondences[i][j]).cast<float>();
-            //         std::string name = "nn_line_" + std::to_string(i) +"_" + std::to_string(correspondences[i][j]);
-            //         viewer->addLine<pcl::PointXYZ, pcl::PointXYZ>(p2, p1, 1.0, 0.0, 0.0, name, 0);
-            //     }
-            // }
-
-            viewer->spin();
-        }
+        // void debugVisualize(const pcl::visualization::PCLVisualizer::Ptr& viewer,
+        //         const CloudType& data_cloud, std::vector<std::vector<int> > correspondences,
+        //        const std::vector<bool>& point_visible, AvatarEvaluationCommonData<AvatarCostFunctorCache>& common) {
+        //     auto modelPclCloud = pcl::PointCloud<pcl::PointXYZRGBA>::Ptr(new pcl::PointCloud<pcl::PointXYZRGBA>());
+        //     auto dataPclCloud = pcl::PointCloud<pcl::PointXYZRGBA>::Ptr(new pcl::PointCloud<pcl::PointXYZRGBA>());
+        //     // auto matchedModelPointsCloud = pcl::PointCloud<pcl::PointXYZRGBA>::Ptr(new pcl::PointCloud<pcl::PointXYZRGBA>());
+        //     modelPclCloud->reserve(common.ava.cloud.cols());
+        //     for (int i = 0 ; i < common.ava.cloud.cols(); ++i) {
+        //         pcl::PointXYZRGBA pt;
+        //         pt.getVector3fMap() = common.ava.cloud.col(i).cast<float>();
+        //         if (!point_visible[i]) {
+        //             pt.r = pt.g = pt.b = 100;
+        //         }  else {
+        //             pt.r = 255;
+        //             pt.g = 0;
+        //             pt.b = 0;
+        //         }
+        //         pt.a = 255;
+        //         modelPclCloud->push_back(std::move(pt));
+        //     }
+        //     dataPclCloud->reserve(data_cloud.cols());
+        //     for (int i = 0 ; i < data_cloud.cols(); ++i) {
+        //         pcl::PointXYZRGBA pt;
+        //         pt.getVector3fMap() = data_cloud.col(i).cast<float>();
+        //         pt.r = 100;
+        //         pt.g = 100;
+        //         pt.b = 100;
+        //         pt.a = 200;
+        //         dataPclCloud->push_back(std::move(pt));
+        //     }
+        //     // matchedModelPointsCloud->reserve(common.caches.size());
+        //     // common.PrepareForEvaluation(true, true);
+        //     // for (auto& cache : common.caches) {
+        //     //     cache.updateData(false);
+        //     //     pcl::PointXYZRGBA pt;
+        //     //     pt.getVector3fMap() = cache.resid.cast<float>();
+        //     //     pt.r = 0;
+        //     //     pt.g = 255;
+        //     //     pt.b = 0;
+        //     //     pt.a = 255;
+        //     //     matchedModelPointsCloud->push_back(std::move(pt));
+        //     // }
+        //
+        //     viewer->setBackgroundColor(0, 0, 0);
+        //     viewer->removePointCloud("cloud");
+        //     viewer->removePointCloud("cloudData");
+        //     viewer->removePointCloud("cachesCloud");
+        //     viewer->removeAllShapes();
+        //     viewer->addPointCloud(modelPclCloud, "cloud", 0);
+        //     viewer->addPointCloud(dataPclCloud, "cloudData", 0);
+        //     // viewer->addPointCloud(matchedModelPointsCloud, "cachesCloud", 0);
+        //     [>
+        //     for (int i = 0; i < common.ava.model.numJoints(); ++i) {
+        //         pcl::PointXYZRGBA curr;
+        //         curr.x = common.jointPosInit(0, i);
+        //         curr.y = common.jointPosInit(1, i);
+        //         curr.z = common.jointPosInit(2, i);
+        //         //std::cerr << "Joint:" << joints[i]->name << ":" << curr.x << "," << curr.y << "," << curr.z << "\n";
+        //
+        //         cv::Vec3f colorf(0.f, 0.f, 1.0f);
+        //         std::string jointName = "avatarJoint" + std::to_string(i);
+        //         viewer->removeShape(jointName, 0);
+        //         viewer->addSphere(curr, 0.02, colorf[0], colorf[1], colorf[2], jointName, 0);
+        //
+        //         // if (joints[i]->parent) {
+        //         //     p parent = util::toPCLPoint(joints[i]->parent->posTransformed);
+        //         //     std::string boneName = pcl_prefix + "avatarBone" + std::to_string(i);
+        //         //     viewer->removeShape(boneName, viewport);
+        //         //     viewer->addLine(curr, parent, colorf[2], colorf[1], colorf[0], boneName, viewport);
+        //         // }
+        //     }
+        //     */
+        //
+        //     // for (size_t i = 0; i < correspondences.size(); ++i) {
+        //     //     for (size_t j = 0; j < correspondences[i].size(); ++j) {
+        //     //         if (random_util::uniform(0.0, 1.0) > 0.05) continue;
+        //     //         pcl::PointXYZ p1, p2;
+        //     //         p1.getVector3fMap() = common.ava.cloud.col(i).cast<float>();
+        //     //         p2.getVector3fMap() = data_cloud.col(correspondences[i][j]).cast<float>();
+        //     //         std::string name = "nn_line_" + std::to_string(i) +"_" + std::to_string(correspondences[i][j]);
+        //     //         viewer->addLine<pcl::PointXYZ, pcl::PointXYZ>(p2, p1, 1.0, 0.0, 0.0, name, 0);
+        //     //     }
+        //     // }
+        //
+        //     viewer->spin();
+        // }
 
 #ifdef TEST_COMPARE_AUTO_DIFF
         /** Given a model point-data point pair, this function checks that autodiff gives the same result
@@ -996,13 +997,16 @@ namespace ark {
         r.resize(ava.model.numJoints());
     }
 
-    void AvatarOptimizer::optimize(const Eigen::Matrix<double, 3, Eigen::Dynamic>& data_cloud, int icp_iters, int num_threads) {
+    void AvatarOptimizer::optimize(const Eigen::Matrix<double, 3, Eigen::Dynamic>& data_cloud,
+            const Eigen::VectorXi& data_part_labels,
+            int num_parts, const int* part_map, int icp_iters, int num_threads) {
         // Convert to quaternion
         for (int i = 0; i < ava.model.numJoints(); ++i) {
             Eigen::AngleAxisd aa;
             aa.fromRotationMatrix(ava.r[i]);
             r[i] = aa;
         }
+
         AvatarEvaluationCommonData<AvatarCostFunctorCache> common(*this, true);
         common.numThreads = num_threads;//boost::thread::hardware_concurrency();;
         std::vector<std::vector<int> > correspondences;
@@ -1014,52 +1018,96 @@ namespace ark {
         testCompareAutoDiff(*this, data_cloud, 0, 0);
 #endif
 
+        // Create separate point cloud for each body part
         AvatarRenderer renderer(ava, intrin);
         std::vector<bool> pointVisible(ava.cloud.size());
 
-        KdTree kdTree(data_cloud, 10);
-        kdTree.index->buildIndex();
+        std::vector<CloudType> partClouds(num_parts);
+        std::vector<Eigen::VectorXi> partIndices(num_parts);
+        Eigen::VectorXi partLabelCounts(num_parts);
+        partLabelCounts.setZero();
+        for (size_t i = 0; i < data_part_labels.rows(); ++i) {
+            ++partLabelCounts(data_part_labels(i));
+        }
+        for (int i = 0; i < num_parts; ++i) {
+            if (partLabelCounts(i) == 0) continue;
+            partClouds[i].resize(3, partLabelCounts(i));
+            partIndices[i].resize(partLabelCounts(i));
+        }
+
+        partLabelCounts.setZero();
+        for (size_t i = 0; i < data_part_labels.rows(); ++i) {
+            int partId = data_part_labels(i);
+            partClouds[partId].col(partLabelCounts(partId)) =
+                data_cloud.col(i);
+            partIndices[partId][partLabelCounts(partId)] = i;
+            ++partLabelCounts(partId);
+        }
+
+        // Build KD tree for each body part
+        std::vector<std::unique_ptr<KdTree>> partKD;
+        for (int i = 0; i < num_parts; ++i) {
+            if (partLabelCounts(i) == 0) {
+                partKD.emplace_back(nullptr);
+                continue;
+            }
+            partKD.emplace_back(new KdTree(partClouds[i], 10));
+            partKD.back()->index->buildIndex();
+        }
+
+        // Store labels for each model skin point
+        Eigen::VectorXi modelPartLabels(ava.model.numPoints());
+        for (size_t i = 0; i < ava.model.numPoints(); ++i) {
+            int mainJointId = ava.model.assignedJoints[i][0].second;
+            modelPartLabels[i] = part_map[mainJointId];
+        }
 
         ceres::Solver::Options options;
         options.linear_solver_type = ceres::LinearSolverType::DENSE_NORMAL_CHOLESKY;
-        options.trust_region_strategy_type = ceres::TrustRegionStrategyType::LEVENBERG_MARQUARDT;
+        // options.trust_region_strategy_type = ceres::TrustRegionStrategyType::LEVENBERG_MARQUARDT;
         //options.preconditioner_type = ceres::PreconditionerType::CLUSTER_JACOBI;
         //options.dogleg_type = ceres::DoglegType::SUBSPACE_DOGLEG;
-        options.initial_trust_region_radius = 1e4;
-        options.minimizer_progress_to_stdout = true;
-        options.logging_type = ceres::LoggingType::PER_MINIMIZER_ITERATION;
-        options.minimizer_type = ceres::TRUST_REGION;
+        // options.initial_trust_region_radius = 1e4;
+        options.minimizer_progress_to_stdout = false;
+        options.logging_type = ceres::LoggingType::SILENT;
+        options.minimizer_type = ceres::LINE_SEARCH;
+        options.use_approximate_eigenvalue_bfgs_scaling = true;
         //options.check_gradients = true;
-        //options.line_search_direction_type = ceres::LBFGS;
+        options.line_search_direction_type = ceres::BFGS;
+        options.line_search_interpolation_type = ceres::CUBIC;
+        // options.max_num_line_search_direction_restarts = 2;
+        // options.max_num_line_search_step_size_iterations = 10;
+        // options.line_search_type = ceres::ARMIJO;
         //options.max_linear_solver_iterations = num_subiter;
-        options.max_num_iterations = 4;
+        options.max_num_iterations = 8;
         options.num_threads = common.numThreads;
         options.function_tolerance = 1e-4;
         options.dense_linear_algebra_library_type = ceres::DenseLinearAlgebraLibraryType::LAPACK;
 
         options.evaluation_callback = &common;
+        std::fill(pointVisible.begin(), pointVisible.end(), true);
 
         for (int icp_iter = 0; icp_iter < icp_iters; ++icp_iter) {
             // Perform point cloud occlusion detection
             BEGIN_PROFILE;
             renderer.update();
-            cv::Mat facesMap = renderer.renderFaces(imageSize);
-            const auto& faces = renderer.getOrderedFaces();
-            std::fill(pointVisible.begin(), pointVisible.end(), false);
-            for (int r = 0; r < facesMap.rows; ++r) {
-                auto* ptr = facesMap.ptr<int32_t>(r);
-                for (int c = 0; c < facesMap.cols; ++c) {
-                    if (~ptr[c]) {
-                        pointVisible[ptr[c]]
-                            = pointVisible[ptr[c]] 
-                            = pointVisible[ptr[c]] = true;
-                    }
-                }
-            }
-            PROFILE(>> Occlusion);
+            // std::fill(pointVisible.begin(), pointVisible.end(), false);
+            // cv::Mat facesMap = renderer.renderFaces(imageSize);
+            // const auto& faces = renderer.getOrderedFaces();
+            // for (int r = 0; r < facesMap.rows; ++r) {
+            //     auto* ptr = facesMap.ptr<int32_t>(r);
+            //     for (int c = 0; c < facesMap.cols; ++c) {
+            //         if (~ptr[c]) {
+            //             pointVisible[faces[ptr[c]].second[0]]
+            //                 = pointVisible[faces[ptr[c]].second[1]]
+            //                 = pointVisible[faces[ptr[c]].second[2]] = true;
+            //         }
+            //     }
+            // }
+            // PROFILE(>> Occlusion);
 
             // Find correspondences
-            findNN(data_cloud, ava.cloud, pointVisible, correspondences, false, &kdTree);
+            findNN(data_cloud, ava.cloud, modelPartLabels, pointVisible, correspondences, partIndices, partKD, nnStep, false);
             PROFILE(>> NN Corresponences);
             
             using namespace ceres;
@@ -1133,7 +1181,7 @@ namespace ark {
             PROFILE(>> Solve);
 
             // output (for debugging)
-            std::cout << summary.FullReport() << "\n";
+            // std::cout << summary.FullReport() << "\n";
 
             // Convert from quaternion
             for (int i = 0; i < ava.model.numJoints(); ++i) {
@@ -1141,7 +1189,7 @@ namespace ark {
             }
             ava.update();
             PROFILE(>> Finish);
-            std::cout << ava.w.transpose() << "\n";
+            // std::cout << ava.w.transpose() << "\n";
 
             /*
             // This block shows the value of each residual
@@ -1155,127 +1203,5 @@ namespace ark {
             }*/
         }
         // viewer->spin();
-    }
-
-    void AvatarOptimizer::align(const Eigen::Matrix<double, 3, Eigen::Dynamic>& smpl_joints, int icp_iters, int num_threads) {
-        // Convert to quaternion
-        for (int i = 0; i < ava.model.numJoints(); ++i) {
-            Eigen::AngleAxisd aa;
-            aa.fromRotationMatrix(ava.r[i]);
-            r[i] = aa;
-        }
-        AvatarEvaluationCommonData<AvatarCostFunctorCache> common(*this, true);
-        common.numThreads = num_threads;//boost::thread::hardware_concurrency();;
-
-        auto viewer = pcl::visualization::PCLVisualizer::Ptr(new pcl::visualization::PCLVisualizer("3D Viewport"));
-        viewer->initCameraParameters();
-
-        ceres::Solver::Options options;
-        options.linear_solver_type = ceres::LinearSolverType::DENSE_NORMAL_CHOLESKY;
-        // options.linear_solver_type = ceres::LinearSolverType::DENSE_NORMAL_CHOLESKY;
-        options.trust_region_strategy_type = ceres::DOGLEG;
-        //options.preconditioner_type = ceres::PreconditionerType::CLUSTER_JACOBI;
-        //options.dogleg_type = ceres::DoglegType::SUBSPACE_DOGLEG;
-        options.initial_trust_region_radius = 1e4;
-        options.minimizer_progress_to_stdout = true;
-        options.logging_type = ceres::LoggingType::PER_MINIMIZER_ITERATION;
-        options.minimizer_type = ceres::TRUST_REGION;
-        //options.check_gradients = true;
-        //options.line_search_direction_type = ceres::LBFGS;
-        //options.max_linear_solver_iterations = num_subiter;
-        options.max_num_iterations = 4;
-        options.num_threads = common.numThreads;
-        options.function_tolerance = 1e-4;
-        options.dense_linear_algebra_library_type = ceres::DenseLinearAlgebraLibraryType::LAPACK;
-
-        options.evaluation_callback = &common;
-
-        for (int icp_iter = 0; icp_iter < icp_iters; ++icp_iter) {
-            // Perform point cloud occlusion detection
-            BEGIN_PROFILE;
-
-            using namespace ceres;
-            Problem problem;
-
-            auto fakeQuaternionLocalParam = new ceres::FakeQuaternionParameterization();
-            problem.AddParameterBlock(ava.p.data(), 3);
-            for (int i = 0; i < ava.model.numJoints(); ++i)  {
-                problem.AddParameterBlock(r[i].coeffs().data(), ROT_SIZE, fakeQuaternionLocalParam);
-            }
-            common.caches.clear();
-            //std::vector<std::tuple<ceres::ResidualBlockId, int, int> > residuals;
-            std::vector<std::vector<double*> > pointParams(ava.model.numJoints());
-            for (int i = 0; i < ava.model.numJoints(); ++i)  {
-                auto& params = pointParams[i];
-                common.caches.emplace_back(common, i);
-                params.push_back(ava.p.data());
-                int p = ava.model.parent[i];
-                while (p != -1) {
-                    params.push_back(r[p].coeffs().data());
-                    p = ava.model.parent[p];
-                }
-                std::reverse(params.begin(), params.end());
-            }
-            PROFILE(>> Construct problem: parameter blocks);
-            // // DEBUG
-            // std::vector<double*> params;
-            // params.push_back(ava.p.data());
-            // for (int k = 0; k < ava.model.numJoints(); ++k) {
-            //     params.push_back(r[k].coeffs().data());
-            // }
-            // //END DEBUG
-            int cid = 0;
-            for (int i = 0; i < ava.model.numJoints(); ++i)  {
-                problem.AddResidualBlock(
-                        new AvatarICPCostFunctor(common, cid, smpl_joints, i),
-                        NULL, pointParams[i]);
-                ++cid;
-            }
-
-            std::vector<double*> posePriorParams;
-            posePriorParams.reserve(ava.model.numJoints() - 1);
-            for (int i = 1; i < ava.model.numJoints(); ++i) {
-                posePriorParams.push_back(r[i].coeffs().data());
-            }
-            if (betaPose > 0.) {
-                problem.AddResidualBlock(new AvatarPosePriorCostFunctor(common), NULL, posePriorParams);
-            }
-            if (betaShape > 0.) {
-                problem.AddResidualBlock(new AvatarShapePriorCostFunctor(ava.model.numShapeKeys(), betaShape), NULL, ava.w.data());
-            }
-            PROFILE(>> Construct problem: residual blocks);
-
-            // debugVisualize(viewer, data_cloud, correspondences, pointVisible, common);
-
-            // Run solver
-            Solver::Summary summary;
-            PROFILE(>> Render in PCL);
-
-            ceres::Solve(options, &problem, &summary);
-
-            PROFILE(>> Solve);
-
-            // output (for debugging)
-            std::cout << summary.FullReport() << "\n";
-
-            // Convert from quaternion
-            for (int i = 0; i < ava.model.numJoints(); ++i) {
-                ava.r[i].noalias() = r[i].toRotationMatrix();
-            }
-            ava.update();
-            PROFILE(>> Finish align);
-
-            /*
-            // This block shows the value of each residual
-            for (auto& res_tup : residuals) {
-                double val;
-                ceres::Problem::EvaluateOptions eo;
-                eo.residual_blocks.push_back(std::get<0>(res_tup));
-                problem.Evaluate(eo, &val, NULL, NULL, NULL);
-                std::cout << val << " energy = ";
-                std::cout << (ava.cloud.col(std::get<1>(res_tup)) - data_cloud.col(std::get<2>(res_tup))).squaredNorm() * 0.5 << "\n";
-            }*/
-        }
-        viewer->spin();
     }
 }
