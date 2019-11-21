@@ -122,35 +122,47 @@ int main(int argc, char** argv) {
             std::string image_path = (path(dataset_path) / "depth_exr" / ("depth_" + ss_img_id.str() + ".exr")).string();
 
             cv::Mat image = cv::imread(image_path, cv::IMREAD_ANYCOLOR | cv::IMREAD_ANYDEPTH);
-            std::vector<cv::Mat> result;
-            for (auto& rtree : rtrees) {
-                std::vector<cv::Mat> model_results = rtree.predict(image);
-                if (result.empty()) result = model_results;
-                else {
-                    for (size_t i = 0; i < result.size(); ++i) {
-                        result[i] += model_results[i];
+            cv::Mat visual = cv::Mat::zeros(image.size(), CV_8UC3);
+            if (rtrees.size() > 1) {
+                std::vector<cv::Mat> result;
+                for (auto& rtree : rtrees) {
+                    std::vector<cv::Mat> model_results = rtree.predict(image);
+                    if (result.empty()) result = model_results;
+                    else {
+                        for (size_t i = 0; i < result.size(); ++i) {
+                            result[i] += model_results[i];
+                        }
                     }
                 }
-            }
-            for (size_t i = 0; i < result.size(); ++i) {
-                result[i] /= model_paths.size();
-            }
+                // for (size_t i = 0; i < result.size(); ++i) {
+                //     result[i] /= model_paths.size();
+                // }
 
-            cv::Mat maxVals(image.size(), CV_32F);
-            maxVals.setTo(0);
-            cv::Mat visual = cv::Mat::zeros(image.size(), CV_8UC3);
-            for (size_t i = 0; i < result.size(); ++i) {
+                cv::Mat maxVals(image.size(), CV_32F);
+                maxVals.setTo(0);
+                for (size_t i = 0; i < result.size(); ++i) {
+                    for (int r = 0; r < image.rows; ++r) {
+                        auto* imPtr = image.ptr<float>(r);
+                        auto* inPtr = result[i].ptr<float>(r);
+                        auto* maxValPtr = maxVals.ptr<float>(r);
+                        auto* visualPtr = visual.ptr<cv::Vec3b>(r);
+                        for (int c = 0; c < image.cols; ++c){
+                            if (imPtr[c] == 0.0) continue;
+                            if (inPtr[c] > maxValPtr[c]) {
+                                maxValPtr[c] = inPtr[c];
+                                visualPtr[c] = paletteColor(i, true);
+                            }
+                        }
+                    }
+                }
+            } else {
+                cv::Mat result = rtrees[0].predictBest(image, std::thread::hardware_concurrency());
                 for (int r = 0; r < image.rows; ++r) {
-                    auto* imPtr = image.ptr<float>(r);
-                    auto* inPtr = result[i].ptr<float>(r);
-                    auto* maxValPtr = maxVals.ptr<float>(r);
+                    auto* inPtr = result.ptr<uint8_t>(r);
                     auto* visualPtr = visual.ptr<cv::Vec3b>(r);
                     for (int c = 0; c < image.cols; ++c){
-                        if (imPtr[c] == 0.0) continue;
-                        if (inPtr[c] > maxValPtr[c]) {
-                            maxValPtr[c] = inPtr[c];
-                            visualPtr[c] = paletteColor(i, true);
-                        }
+                        if (inPtr[c] == 255) continue;
+                        visualPtr[c] = paletteColor(inPtr[c], true);
                     }
                 }
             }

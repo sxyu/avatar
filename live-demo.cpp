@@ -41,9 +41,10 @@ int main(int argc, char ** argv) {
     /** Number of body parts from part map, used in rtree, etc. */
     const int numParts = 16;
     std::string intrinPath, rtreePath;
-    int nnStep;
+    int nnStep, interval, frameICPIters, reinitICPIters, initialICPIters;
+    int initialPerPartCnz, reinitCnz;
     float betaPose, betaShape;
-    bool rtreeOnly;
+    bool rtreeOnly, disableOcclusion;
     cv::Size size;
 
     po::options_description desc("Option arguments");
@@ -51,11 +52,18 @@ int main(int argc, char ** argv) {
     po::options_description descCombined("");
     desc.add_options()
         ("help", "produce help message")
-        ("rtreeonly,r", po::bool_switch(&rtreeOnly), "Show RTree part segmentation only and skip optimization")
-        ("betapose", po::value<float>(&betaPose)->default_value(0.2), "Optimization loss function: pose prior term weight")
-        ("betashape", po::value<float>(&betaShape)->default_value(0.2), "Optimization loss function: shape prior term weight")
-        ("nnstep", po::value<int>(&nnStep)->default_value(20), "Optimization nearest-neighbor step: only matches neighbors every x points; a heuristic to improve speed")
-        ("intrin_path,i", po::value<std::string>(&intrinPath)->default_value(""), "Path to camera intrinsics file (default: uses hardcoded K4A intrinsics)")
+        ("rtree-only,R", po::bool_switch(&rtreeOnly), "Show RTree part segmentation only and skip optimization")
+        ("no-occlusion", po::bool_switch(&disableOcclusion), "Disable occlusion detection in avatar optimizer prior to NN matching")
+        ("betapose", po::value<float>(&betaPose)->default_value(0.14), "Optimization loss function: pose prior term weight")
+        ("betashape", po::value<float>(&betaShape)->default_value(0.12), "Optimization loss function: shape prior term weight")
+        ("nnstep", po::value<int>(&nnStep)->default_value(20), "Optimization nearest-neighbor step: only matches neighbors every x points; a heuristic to improve speed (currently, not used)")
+        ("data-interval,I", po::value<int>(&interval)->default_value(12), "Only computes rtree weights and optimizes for pixels with x = y = 0 mod interval")
+        ("frame-icp-iters,t", po::value<int>(&frameICPIters)->default_value(3), "ICP iterations per frame")
+        ("reinit-icp-iters,T", po::value<int>(&reinitICPIters)->default_value(5), "ICP iterations when reinitializing (after tracking loss)")
+        ("initial-icp-iters,e", po::value<int>(&initialICPIters)->default_value(7), "ICP iterations when reinitializing (at beginning)")
+        ("intrin-path,i", po::value<std::string>(&intrinPath)->default_value(""), "Path to camera intrinsics file (default: uses hardcoded K4A intrinsics)")
+        ("initial-per-part-thresh", po::value<int>(&initialPerPartCnz)->default_value(80), "Initial detected points per body part (/interval^2) to start tracking avatar")
+        ("min-points,M", po::value<int>(&reinitCnz)->default_value(1000), "Minimum number of detected body points to allow continued tracking; if it falls below this number, then the tracker reinitializes")
         ("width", po::value<int>(&size.width)->default_value(1280), "Width of generated images")
         ("height", po::value<int>(&size.height)->default_value(720), "Height of generated imaes")
     ;
@@ -111,10 +119,12 @@ int main(int argc, char ** argv) {
 
     ark::AvatarModel avaModel;
     ark::Avatar ava(avaModel);
-    ark::AvatarOptimizer avaOpt(ava, intrin, size);
+    ark::AvatarOptimizer avaOpt(ava, intrin, size, numParts,
+                                ark::part_map::SMPL_JOINT_TO_PART_MAP);
     avaOpt.betaPose = betaPose; 
     avaOpt.betaShape = betaShape;
     avaOpt.nnStep = nnStep;
+    avaOpt.enableOcclusion = !disableOcclusion;
     ark::BGSubtractor bgsub{cv::Mat()};
 
     ark::RTree rtree(0);
@@ -202,7 +212,7 @@ int main(int argc, char ** argv) {
                     }
                 }
 
-                cv::Mat result = rtree.predictBest(depth, std::thread::hardware_concurrency());
+                cv::Mat result = rtree.predictBest(depth, std::thread::hardware_concurrency(), interval);
                 if (rtreeOnly) {
                     for (int r = 0; r < depth.rows; ++r) {
                         auto* inPtr = result.ptr<uint8_t>(r);
@@ -224,7 +234,7 @@ int main(int argc, char ** argv) {
                         }
                     }
                     size_t cnz = partCnz.sum();
-                    if ((firstTime && partCnz.minCoeff() < 80) || cnz < 1000) {
+                    if ((firstTime && partCnz.minCoeff() < std::max(1, initialPerPartCnz / (interval*interval))) || cnz < reinitCnz / (interval * interval)) {
                         reinit = true;
                     }
                     else {
@@ -243,7 +253,7 @@ int main(int argc, char ** argv) {
                                 ++i;
                             }
                         }
-                        int icpIters = 2;
+                        int icpIters = frameICPIters;
                         if (reinit) {
                             Eigen::Vector3d cloudCen = dataCloud.rowwise().mean();
                             ava.p = cloudCen;
@@ -254,13 +264,12 @@ int main(int argc, char ** argv) {
                             ava.r[0] = Eigen::AngleAxisd(M_PI, Eigen::Vector3d(0, 1, 0)).toRotationMatrix();
                             reinit = false;
                             ava.update();
-                            icpIters = firstTime ? 7 : 5;
+                            icpIters = firstTime ? initialICPIters : reinitICPIters;
                             std::cerr << "Note: reinitializing tracking\n";
                             if (firstTime) firstTime = false;
                         }
                         BEGIN_PROFILE;
-                        avaOpt.optimize(dataCloud, dataPartLabels, numParts,
-                                ark::part_map::SMPL_JOINT_TO_PART_MAP,
+                        avaOpt.optimize(dataCloud, dataPartLabels,
                                 icpIters,
                                 std::thread::hardware_concurrency());
                         PROFILE(Optimize (Total));

@@ -11,6 +11,7 @@
 #include "AvatarRenderer.h"
 #include "SparseImage.h"
 #include "ViconSkeleton.h"
+#include "RTree.h"
 #include "Util.h"
 #define BEGIN_PROFILE auto start = std::chrono::high_resolution_clock::now()
 #define PROFILE(x) do{printf("%s: %f ms\n", #x, std::chrono::duration<double, std::milli>(std::chrono::high_resolution_clock::now() - start).count()); start = std::chrono::high_resolution_clock::now(); }while(false)
@@ -301,6 +302,18 @@ static void __avatarGUI()
 // Get depth at point in depth image, or return BACKGROUND_DEPTH
 
 int main(int argc, char** argv) {
-    __avatarGUI();
+    // __avatarGUI();
+    ark::RTree rtree(16);
+    rtree.loadFile("/mnt_d/Programming/5Explore/smplsynth/build/rtree-results/tree.150k.refine.srtr");
+    cv::Mat m;
+    volatile int sum = 0;
+    m = cv::imread("/mnt_d/Programming/5Explore/smplsynth/build/ds/depth_exr/depth_00000000.exr");
+    BEGIN_PROFILE;
+    for (int i = 0; i < 2000; ++i) {
+        cv::Mat result = rtree.predictBest(m, 4);
+        sum += cv::countNonZero(result);
+    }
+    PROFILE(Total);
+    cout << sum << "\n";
     return 0;
 }

@@ -2917,29 +2917,55 @@ namespace ark {
         return result;
     }
 
-    cv::Mat RTree::predictBest(const cv::Mat& depth, int num_threads) {
+    cv::Mat RTree::predictBest(const cv::Mat& depth, int num_threads, int interval) {
         cv::Mat result(depth.size(), CV_8U);
         result.setTo(255);
-        auto worker = [&](int start_row, int end_row) {
+        std::atomic<int> row(0);
+        auto worker = [&]() {
             Vec2i pix;
             uint8_t* ptr;
-            for (int r = start_row; r < end_row; ++r) {
+            int r;
+            while(true) {
+                r = (row += interval);
+                if (r >= depth.rows) break;
                 pix(1) = r;
                 ptr = result.ptr<uint8_t>(r);
                 const auto* inPtr = depth.ptr<float>(r);
-                for (int c = 0; c < depth.cols; ++c) {
+                for (int c = 0; c < depth.cols; c += interval) {
                     if (inPtr[c] == 0.f) continue;
                     pix(0) = c;
-                    ptr[c] = predictRecursiveBest(0, depth, pix);
+                    int nodeid = 0;
+                    float sampleDepth = inPtr[c];
+                    while (nodes[nodeid].leafid == -1) {
+                        auto& node = nodes[nodeid];
+
+                        // Add feature u,v and round
+                        Eigen::Vector2f ut = node.u / sampleDepth,
+                            vt = node.v / sampleDepth;
+                        Eigen::Vector2i uti, vti;
+                        uti[0] = static_cast<int32_t>(std::round(ut.x()));
+                        uti[1] = static_cast<int32_t>(std::round(ut.y()));
+                        vti[0] = static_cast<int32_t>(std::round(vt.x()));
+                        vti[1] = static_cast<int32_t>(std::round(vt.y()));
+                        uti += pix.cast<int32_t>(); vti += pix.cast<int32_t>();
+
+                        float score = (getDepth(depth, uti) - getDepth(depth, vti));
+
+                        if (score < node.thresh) {
+                            nodeid = node.lnode;
+                        } else {
+                            nodeid = node.rnode;
+                        }
+                    }
+                    ptr[c] = leafBestMatch[nodes[nodeid].leafid];
                 }
             }
         };
-        int step = depth.rows / num_threads;
+        // int step = depth.rows / num_threads;
         std::vector<std::thread> threadMgr;
-        for (int i = 0; i < num_threads - 1; ++i) {
-            threadMgr.emplace_back(worker, step * i, step * (i + 1));
+        for (int i = 0; i < num_threads; ++i) {
+            threadMgr.emplace_back(worker);
         }
-        threadMgr.emplace_back(worker, step * (num_threads - 1), depth.rows);
         for (int i = 0; i < num_threads; ++i) {
             threadMgr[i].join();
         }
