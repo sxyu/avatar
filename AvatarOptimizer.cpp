@@ -14,8 +14,14 @@
 #include "AvatarRenderer.h"
 #include "Util.h"
 
-// #undef OPENARK_PCL_ENABLED
-#ifdef OPENARK_PCL_ENABLED
+// #define PCL_DEBUG_VISUALIZE
+
+#ifndef OPENARK_PCL_ENABLED
+// If PCL not available then cannot visualize
+#undef PCL_DEBUG_VISUALIZE
+#endif
+
+#ifdef PCL_DEBUG_VISUALIZE
 #include <pcl/visualization/pcl_visualizer.h>
 #endif
 
@@ -811,7 +817,7 @@ namespace ark {
             }
         }
 
-#ifdef OPENARK_PCL_ENABLED
+#ifdef PCL_DEBUG_VISUALIZE
         void debugVisualize(const pcl::visualization::PCLVisualizer::Ptr& viewer,
                 const CloudType& data_cloud, std::vector<std::vector<int> > correspondences,
                const std::vector<bool>& point_visible, AvatarEvaluationCommonData<AvatarCostFunctorCache>& common) {
@@ -1075,7 +1081,7 @@ namespace ark {
         common.numThreads = num_threads;//boost::thread::hardware_concurrency();;
         std::vector<std::vector<int> > correspondences;
 
-#ifdef OPENARK_PCL_ENABLED
+#ifdef PCL_DEBUG_VISUALIZE
         auto viewer = pcl::visualization::PCLVisualizer::Ptr(new pcl::visualization::PCLVisualizer("3D Viewport"));
         viewer->initCameraParameters();
 #endif
@@ -1250,7 +1256,7 @@ namespace ark {
             }
             PROFILE(>> Construct problem: residual blocks);
 
-#ifdef OPENARK_PCL_ENABLED
+#ifdef PCL_DEBUG_VISUALIZE
             debugVisualize(viewer, data_cloud, correspondences, pointVisible, common);
 #endif
 
@@ -1284,7 +1290,7 @@ namespace ark {
                 std::cout << (ava.cloud.col(std::get<1>(res_tup)) - data_cloud.col(std::get<2>(res_tup))).squaredNorm() * 0.5 << "\n";
             }*/
         }
-#ifdef OPENARK_PCL_ENABLED
+#ifdef PCL_DEBUG_VISUALIZE
         viewer->spin();
         viewer->close();
 #endif
