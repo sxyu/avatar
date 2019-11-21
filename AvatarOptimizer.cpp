@@ -1151,7 +1151,7 @@ namespace ark {
         // options.max_num_line_search_step_size_iterations = 10;
         // options.line_search_type = ceres::ARMIJO;
         //options.max_linear_solver_iterations = num_subiter;
-        options.max_num_iterations = 10;
+        options.max_num_iterations = maxItersPerICP;
         // options.num_threads = common.numThreads;
         options.function_tolerance = 1e-4;
         options.dense_linear_algebra_library_type = ceres::DenseLinearAlgebraLibraryType::LAPACK;
@@ -1269,7 +1269,7 @@ namespace ark {
             PROFILE(>> Solve);
 
             // output (for debugging)
-            std::cout << summary.FullReport() << "\n";
+            // std::cout << summary.FullReport() << "\n";
 
             // Convert from quaternion
             for (int i = 0; i < ava.model.numJoints(); ++i) {

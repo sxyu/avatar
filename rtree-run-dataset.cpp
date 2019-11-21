@@ -1,11 +1,13 @@
 #include <iostream>
 #include <iomanip>
+#include <cstring>
 #include <boost/program_options.hpp>
 #include <boost/filesystem.hpp>
 #include "opencv2/core.hpp"
 #include "opencv2/imgproc.hpp"
 #include "opencv2/highgui.hpp"
 
+#include <Eigen/Core>
 #include "RTree.h"
 
 namespace {
@@ -188,6 +190,5 @@ int main(int argc, char** argv) {
         cv::waitKey(0);
     }
     */
-
     return 0;
 }

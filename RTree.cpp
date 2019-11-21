@@ -64,7 +64,108 @@ namespace {
             uti += pix.cast<int32_t>(); vti += pix.cast<int32_t>();
 
             return (getDepth(depth_image, uti) - getDepth(depth_image, vti));
+    }
+
+    void upscaleGrid(cv::Mat& image, int interval) {
+        for (int rr = 0 ; rr < image.rows; rr += interval) {
+            uint8_t* ptrRef = image.ptr<uint8_t>(rr);
+            for (int r = rr ; r < rr + interval; ++r) {
+                uint8_t* ptr = image.ptr<uint8_t>(r);
+                for (int cc = 0 ; cc < image.cols; cc += interval) {
+                    uint8_t val = ptrRef[cc];
+                    memset(ptr + cc, val, interval);
+                }
+            }
         }
+    }
+
+    void majorityGrid(cv::Mat& image, int interval, int num_parts) {
+        Eigen::VectorXi cnt(num_parts + 1);
+        for (int rr = 0 ; rr < image.rows; rr += interval) {
+            for (int cc = 0 ; cc < image.cols; cc += interval) {
+                cnt.setZero();
+                for (int r = rr ; r < rr + interval; ++r) {
+                    uint8_t* ptr = image.ptr<uint8_t>(r);
+                    for (int c = cc ; c < cc + interval; ++c) {
+                        if (ptr[c] == 255) ++cnt[num_parts];
+                        else ++cnt[ptr[c]];
+                    }
+                }
+                int argmax;
+                cnt.maxCoeff(&argmax);
+                if (argmax == num_parts) argmax = 255;
+
+                uint8_t bestPartId = argmax; 
+                for (int r = rr ; r < rr + interval; ++r) {
+                    uint8_t* ptr = image.ptr<uint8_t>(r);
+                    memset(ptr + cc, bestPartId, interval);
+                }
+            }
+        }
+    }
+
+    void suppressPartNonMax(cv::Mat& image, int interval, int num_parts) {
+        const int VISITED_OFFSET = 128;
+
+        std::vector<int> stk, curCompVis;
+        std::vector<std::vector<int> > bestComp(num_parts);
+        stk.reserve(image.rows * image.cols);
+        curCompVis.reserve(image.rows * image.cols);
+        int hi_bit = (1<<16);
+        int lo_mask = hi_bit - 1;
+        hi_bit *= interval;
+
+        auto maybe_visit = [&](int curr_r, int curr_c, uint8_t curr_val, int new_r, int new_c, int new_id) {
+            uint8_t& val = image.at<uint8_t>(new_r, new_c);
+            if (curr_val == val) {
+                val += VISITED_OFFSET;
+                curCompVis.push_back(new_id);
+                stk.push_back(new_id);
+            }
+        };
+
+        for (int rr = 0 ; rr < image.rows; rr += interval) {
+            uint8_t* ptr = image.ptr<uint8_t>(rr);
+            for (int cc = 0 ; cc < image.cols; cc += interval) {
+                uint8_t val = ptr[cc];
+                if (val >= VISITED_OFFSET) continue;
+
+                ptr[cc] += VISITED_OFFSET;
+                stk.push_back((rr << 16) + cc);
+                curCompVis.clear();
+                curCompVis.push_back(stk.back());
+                while (stk.size()) {
+                    int id = stk.back();
+                    const int cur_r = (id >> 16), cur_c = (id & lo_mask);
+                    stk.pop_back();
+                    if (cur_r >= interval) maybe_visit(cur_r, cur_c, val, cur_r - interval, cur_c, id - hi_bit);
+                    if (cur_r < image.rows - interval) maybe_visit(cur_r, cur_c, val, cur_r + 1, cur_c, id + hi_bit);
+                    if (cur_c >= interval) maybe_visit(cur_r, cur_c, val, cur_r, cur_c - interval, id - interval);
+                    if (cur_c < image.cols - interval) maybe_visit(cur_r, cur_c, val, cur_r, cur_c + interval, id + interval);
+                }
+                if (curCompVis.size() > bestComp[val].size()) {
+                    for (int id : bestComp[val]) {
+                        const int cr = (id >> 16), cc = (id & lo_mask);
+                        image.at<uint8_t>(cr, cc) = 255;
+                    }
+                    bestComp[val].swap(curCompVis);
+                } else {
+                    for (int id : curCompVis) {
+                        const int cr = (id >> 16), cc = (id & lo_mask);
+                        image.at<uint8_t>(cr, cc) = 255;
+                    }
+                }
+            }
+        }
+        for (int rr = 0 ; rr < image.rows; ++rr) {
+            uint8_t* ptr = image.ptr<uint8_t>(rr);
+            for (int cc = 0 ; cc < image.cols; ++cc) {
+                uint8_t& val = ptr[cc];
+                if (val >= VISITED_OFFSET && val != 255)
+                    val -= VISITED_OFFSET;
+            }
+        }
+    }
 }
 
 namespace ark {
@@ -2917,7 +3018,7 @@ namespace ark {
         return result;
     }
 
-    cv::Mat RTree::predictBest(const cv::Mat& depth, int num_threads, int interval) {
+    cv::Mat RTree::predictBest(const cv::Mat& depth, int num_threads, int interval, bool fill_in_gaps) {
         cv::Mat result(depth.size(), CV_8U);
         result.setTo(255);
         std::atomic<int> row(0);
@@ -2968,6 +3069,10 @@ namespace ark {
         }
         for (int i = 0; i < num_threads; ++i) {
             threadMgr[i].join();
+        }
+
+        if (fill_in_gaps && interval > 1) {
+            upscaleGrid(result, interval);
         }
         return result;
     }
@@ -3128,6 +3233,12 @@ namespace ark {
         if (zeroCnt) {
             std::cout << "WARNING: " << zeroCnt << " leaves were unvisited, keeping old weights.\n";
         }
+    }
+
+    void RTree::postProcess(cv::Mat& image, int interval) const {
+        // if (interval > 1) majorityGrid(image, interval, numParts);
+        suppressPartNonMax(image, interval, numParts);
+        if (interval > 1) upscaleGrid(image, interval);
     }
 
     void RTree::updateBestMatchTable() {

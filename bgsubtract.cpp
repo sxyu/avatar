@@ -24,7 +24,7 @@ int main(int argc, char** argv) {
     namespace po = boost::program_options;
     std::string datasetPath;
     int bgId, imId, padSize, nnStep, interval;
-    int frameICPIters, reinitICPIters, reinitCnz;
+    int frameICPIters, reinitICPIters, reinitCnz, itersPerICP;
     float betaPose, betaShape;
     std::string rtreePath;
     bool rtreeOnly, disableOcclusion;
@@ -46,6 +46,7 @@ int main(int argc, char** argv) {
         ("nnstep", po::value<int>(&nnStep)->default_value(20), "Optimization nearest-neighbor step: only matches neighbors every x points; a heuristic to improve speed (currently, not used)")
         ("frame-icp-iters,t", po::value<int>(&frameICPIters)->default_value(3), "ICP iterations per frame")
         ("reinit-icp-iters,T", po::value<int>(&reinitICPIters)->default_value(6), "ICP iterations when reinitializing (at beginning/after tracking loss)")
+        ("inner-iters,p", po::value<int>(&itersPerICP)->default_value(10), "Maximum inner iterations per ICP step")
         ("min-points,M", po::value<int>(&reinitCnz)->default_value(1000), "Minimum number of detected body points to allow continued tracking; if it falls below this number, then the tracker reinitializes")
     ;
     descPositional.add_options()
@@ -89,6 +90,8 @@ int main(int argc, char** argv) {
         intrin.readFile(intrinPath);
     }
 
+    // if (rtreeOnly) interval = 1;
+
     std::stringstream ss_bg_id;
     ss_bg_id << std::setw(padSize) << std::setfill('0') << std::to_string(bgId);
     std::string bgPath = (path(datasetPath) / "depth_exr" / ("depth_" + ss_bg_id.str() + ".exr")).string();
@@ -107,6 +110,7 @@ int main(int argc, char** argv) {
     avaOpt.betaShape = betaShape;
     avaOpt.nnStep = nnStep;
     avaOpt.enableOcclusion = !disableOcclusion;
+    avaOpt.maxItersPerICP = itersPerICP;
     ark::BGSubtractor bgsub(background);
     std::vector<std::array<int, 2> > compsBySize;
 
@@ -156,7 +160,8 @@ int main(int argc, char** argv) {
         if (rtreePath.size()) {
             vis.setTo(cv::Vec3b(0,0,0));
             BEGIN_PROFILE;
-            cv::Mat result = rtree.predictBest(depth, std::thread::hardware_concurrency(), interval);
+            cv::Mat result = rtree.predictBest(depth, std::thread::hardware_concurrency(), 2);
+            rtree.postProcess(result);
             PROFILE(RTree inference);
             if (rtreeOnly) {
                 for (int r = 0; r < depth.rows; ++r) {
@@ -168,6 +173,19 @@ int main(int argc, char** argv) {
                     }
                 }
             } else {
+                // Sparsify
+                if (interval > 1) {
+                    for (int rr = 0 ; rr < result.rows; rr += interval) {
+                        for (int cc = 0 ; cc < result.cols; cc += interval) {
+                            uint8_t* ptr = result.ptr<uint8_t>(rr);
+                            memset(ptr + cc + 1, 255, interval - 1);
+                        }
+                        for (int r = rr + 1; r < rr + interval; ++r) {
+                            uint8_t* ptr = result.ptr<uint8_t>(r);
+                            memset(ptr, 255, result.cols);
+                        }
+                    }
+                }
                 size_t cnz = 0;
                 for (int r = 0; r < depth.rows; ++r) {
                     auto* partptr = result.ptr<uint8_t>(r);
@@ -238,6 +256,7 @@ int main(int argc, char** argv) {
         }
 
         cv::imshow("Visual", vis);
+        // cv::imshow("Depth", depth);
         ++imId;
         int k = cv::waitKey(1);
         if (k == 'q') break;

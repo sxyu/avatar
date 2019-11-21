@@ -42,7 +42,7 @@ int main(int argc, char ** argv) {
     const int numParts = 16;
     std::string intrinPath, rtreePath;
     int nnStep, interval, frameICPIters, reinitICPIters, initialICPIters;
-    int initialPerPartCnz, reinitCnz;
+    int initialPerPartCnz, reinitCnz, itersPerICP;
     float betaPose, betaShape;
     bool rtreeOnly, disableOcclusion;
     cv::Size size;
@@ -61,6 +61,7 @@ int main(int argc, char ** argv) {
         ("frame-icp-iters,t", po::value<int>(&frameICPIters)->default_value(3), "ICP iterations per frame")
         ("reinit-icp-iters,T", po::value<int>(&reinitICPIters)->default_value(5), "ICP iterations when reinitializing (after tracking loss)")
         ("initial-icp-iters,e", po::value<int>(&initialICPIters)->default_value(7), "ICP iterations when reinitializing (at beginning)")
+        ("inner-iters,p", po::value<int>(&itersPerICP)->default_value(10), "Maximum inner iterations per ICP step")
         ("intrin-path,i", po::value<std::string>(&intrinPath)->default_value(""), "Path to camera intrinsics file (default: uses hardcoded K4A intrinsics)")
         ("initial-per-part-thresh", po::value<int>(&initialPerPartCnz)->default_value(80), "Initial detected points per body part (/interval^2) to start tracking avatar")
         ("min-points,M", po::value<int>(&reinitCnz)->default_value(1000), "Minimum number of detected body points to allow continued tracking; if it falls below this number, then the tracker reinitializes")
@@ -125,6 +126,7 @@ int main(int argc, char ** argv) {
     avaOpt.betaShape = betaShape;
     avaOpt.nnStep = nnStep;
     avaOpt.enableOcclusion = !disableOcclusion;
+    avaOpt.maxItersPerICP = itersPerICP;
     ark::BGSubtractor bgsub{cv::Mat()};
 
     ark::RTree rtree(0);
@@ -212,7 +214,8 @@ int main(int argc, char ** argv) {
                     }
                 }
 
-                cv::Mat result = rtree.predictBest(depth, std::thread::hardware_concurrency(), interval);
+                cv::Mat result = rtree.predictBest(depth, std::thread::hardware_concurrency(), 2);
+                rtree.postProcess(result);
                 if (rtreeOnly) {
                     for (int r = 0; r < depth.rows; ++r) {
                         auto* inPtr = result.ptr<uint8_t>(r);
@@ -224,6 +227,19 @@ int main(int argc, char ** argv) {
                     }
                 }
                 else {
+                    // Sparsify
+                    if (interval > 1) {
+                        for (int rr = 0 ; rr < result.rows; rr += interval) {
+                            for (int cc = 0 ; cc < result.cols; cc += interval) {
+                                uint8_t* ptr = result.ptr<uint8_t>(rr);
+                                memset(ptr + cc + 1, 255, interval - 1);
+                            }
+                            for (int r = rr + 1; r < rr + interval; ++r) {
+                                uint8_t* ptr = result.ptr<uint8_t>(r);
+                                memset(ptr, 255, result.cols);
+                            }
+                        }
+                    }
                     Eigen::Matrix<size_t, Eigen::Dynamic, 1> partCnz(numParts);
                     partCnz.setZero();
                     for (int r = 0; r < depth.rows; ++r) {

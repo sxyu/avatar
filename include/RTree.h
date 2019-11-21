@@ -65,8 +65,12 @@ namespace ark {
 
         /** Predict best match for each pixel in image. Returns CV_8U Mat 
          *  Do not call unless model has been trained or loaded
-         *  @param interval only computes for pixels with x = y = 0 mod interval */
-        cv::Mat predictBest(const cv::Mat& depth, int num_threads, int interval = 1);
+         *  @param interval only computes for pixels with x = y = 0 mod interval
+         *  @param fill_in_gaps if interval is > 1, setting this to false leaves
+         *  pixels not at the interval black. Otherwise fills with the computed pixel
+         *  to the top left.  */
+        cv::Mat predictBest(const cv::Mat& depth, int num_threads, int interval = 1,
+                bool fill_in_gaps = true);
 
         /** Train from images and part-masks in OpenARK DataSet format,
          *  with num_images random images and num_points_per_image random pixels
@@ -131,6 +135,15 @@ namespace ark {
                    int num_images = 10000,
                    const int* part_map = nullptr // part map
                    );
+
+        /** Utility function for post-processing an output body part labels image
+         * obtained from predictBest (or manually computed from predict), in order
+         * to get higher confidence results.
+         * First (optionally) a majority vote is taken in each interval^2 window to get smoother body part labels. 
+         * Then only the largest connected component for each body part label is kept
+         * @param image input/output image
+         * @param interval size of window to take majority vote of part labels. If interval is 1, no majority vote is used */
+        void postProcess(cv::Mat& image, int interval = 1) const;
 
         std::vector<RNode, Eigen::aligned_allocator<RNode> > nodes;
         std::vector<Distribution> leafData;

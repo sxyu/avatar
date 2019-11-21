@@ -32,6 +32,9 @@ namespace ark {
          *  (sort of hack; only applied in forward NN matching mode) */
         int nnStep = 20;
 
+        /** maximum inner iterations per ICP */
+        int maxItersPerICP = 10;
+
         /** Whether to elimiate occluded points before NN matching */
         bool enableOcclusion = true;
 
