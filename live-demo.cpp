@@ -54,7 +54,7 @@ int main(int argc, char ** argv) {
         ("help", "produce help message")
         ("rtree-only,R", po::bool_switch(&rtreeOnly), "Show RTree part segmentation only and skip optimization")
         ("no-occlusion", po::bool_switch(&disableOcclusion), "Disable occlusion detection in avatar optimizer prior to NN matching")
-        ("betapose", po::value<float>(&betaPose)->default_value(0.14), "Optimization loss function: pose prior term weight")
+        ("betapose", po::value<float>(&betaPose)->default_value(0.05), "Optimization loss function: pose prior term weight")
         ("betashape", po::value<float>(&betaShape)->default_value(0.12), "Optimization loss function: shape prior term weight")
         ("nnstep", po::value<int>(&nnStep)->default_value(20), "Optimization nearest-neighbor step: only matches neighbors every x points; a heuristic to improve speed (currently, not used)")
         ("data-interval,I", po::value<int>(&interval)->default_value(12), "Only computes rtree weights and optimizes for pixels with x = y = 0 mod interval")
