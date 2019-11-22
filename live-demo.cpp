@@ -57,7 +57,7 @@ int main(int argc, char ** argv) {
         ("betapose", po::value<float>(&betaPose)->default_value(0.14), "Optimization loss function: pose prior term weight")
         ("betashape", po::value<float>(&betaShape)->default_value(0.12), "Optimization loss function: shape prior term weight")
         ("nnstep", po::value<int>(&nnStep)->default_value(20), "Optimization nearest-neighbor step: only matches neighbors every x points; a heuristic to improve speed (currently, not used)")
-        ("data-interval,I", po::value<int>(&interval)->default_value(20), "Only computes rtree weights and optimizes for pixels with x = y = 0 mod interval")
+        ("data-interval,I", po::value<int>(&interval)->default_value(12), "Only computes rtree weights and optimizes for pixels with x = y = 0 mod interval")
         ("frame-icp-iters,t", po::value<int>(&frameICPIters)->default_value(3), "ICP iterations per frame")
         ("reinit-icp-iters,T", po::value<int>(&reinitICPIters)->default_value(5), "ICP iterations when reinitializing (after tracking loss)")
         ("initial-icp-iters,e", po::value<int>(&initialICPIters)->default_value(7), "ICP iterations when reinitializing (at beginning)")
