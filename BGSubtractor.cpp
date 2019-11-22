@@ -1,33 +1,17 @@
 #include "BGSubtractor.h"
 
+#include <atomic>
+#include <thread>
 #include <opencv2/imgcodecs.hpp>
 #include "Util.h"
 
 namespace ark {
     namespace {
-        inline bool checkNNDist(const cv::Mat& background, const cv::Mat& image, int r, int c, const cv::Vec3f& val,
-                int size, float thresh) {
-            if (val[2] == 0.0) return false;
-
-            int minc = std::max(c - size, 0), maxc = std::min(c + size, image.cols - 1);
-            int minr = std::max(r - size, 0), maxr = std::min(r + size, image.rows - 1);
-            // float best_norm = std::numeric_limits<float>::max();
-            for (int r = minr; r <= maxr; ++r) {
-                const cv::Vec3f* rptr = background.ptr<cv::Vec3f>(r);
-                for (int c = minc; c <= maxc; ++c) {
-                    const auto& neighb = rptr[c];
-                    if (neighb[2] == 0.0) continue;
-                    cv::Vec3f diff = neighb - val;
-                    float norm = diff[0] * diff[0] + diff[1] * diff[1] + diff[2] * diff[2];
-                    if (norm < thresh) return false;
-                }
-            }
-            return true;
-        }
-
-        cv::Mat ffill(const cv::Mat& background, const cv::Mat& image, int size,
-                float nn_dist_thresh, float neighb_thresh = FLT_MAX,
-                std::vector<std::array<int, 2> >* comps_by_size = nullptr) {
+        cv::Mat ffill(
+                const cv::Mat& background, const cv::Mat& image, int size, int num_threads,
+                float nn_dist_thresh, float neighb_thresh,
+                std::vector<std::array<int, 2> >* comps_by_size,
+                cv::Point& top_left, cv::Point& bot_right) {
             cv::Mat absimg(image.size(), CV_8UC1);
             const uint8_t UNVISITED = 254, INVALID = 255;
             absimg.setTo(UNVISITED);
@@ -43,6 +27,52 @@ namespace ark {
                 comps_by_size->clear();
             }
 
+            {
+                std::atomic<int> row(0);
+                auto check = [size, nn_dist_thresh, &background](int rr, int cc, const cv::Vec3f& val, uint8_t& invalid_bit) {
+                    int minc = std::max(cc - size, 0), maxc = std::min(cc + size, background.cols - 1);
+                    int minr = std::max(rr - size, 0), maxr = std::min(rr + size, background.rows - 1);
+                    // float best_norm = std::numeric_limits<float>::max();
+                    for (int r = minr; r <= maxr; ++r) {
+                        const cv::Vec3f* rptr = background.ptr<cv::Vec3f>(r);
+                        for (int c = minc; c <= maxc; ++c) {
+                            const auto& neighb = rptr[c];
+                            if (neighb[2] == 0.0) continue;
+                            cv::Vec3f diff = neighb - val;
+                            float norm = diff[0] * diff[0] + diff[1] * diff[1] + diff[2] * diff[2];
+                            if (norm < nn_dist_thresh) {
+                                invalid_bit = INVALID;
+                                return;
+                            }
+                        }
+                    }
+                };
+                auto worker = [&] () {
+                    int rr = 0;
+                    while (true) {
+                        rr = row++;
+                        if (rr >= image.rows) break;
+                        auto* ptr = image.ptr<cv::Vec3f>(rr);
+                        auto* absptr = absimg.ptr<uint8_t>(rr);
+
+                        for (int cc = 0 ; cc < image.cols; ++cc) {
+                            if (ptr[cc][2] == 0.0) {
+                                absptr[cc] = INVALID;
+                                continue;
+                            }
+                            check(rr, cc, ptr[cc], absptr[cc]);
+                        }
+                    }
+                };
+                std::vector<std::thread> thds;
+                for (int i = 0; i < num_threads; ++i) {
+                    thds.emplace_back(worker);
+                }
+                for (int i = 0; i < num_threads; ++i) {
+                    thds[i].join();
+                }
+            }
+
             auto maybe_visit = [&](int curr_r, int curr_c, const cv::Vec3f& curr_val, int new_r, int new_c, int new_id) {
                 if (absimg.at<uint8_t>(new_r, new_c) == UNVISITED) {
                     const cv::Vec3f& val = image.at<cv::Vec3f>(new_r, new_c);
@@ -50,25 +80,17 @@ namespace ark {
                     if (diff[0] * diff[0] + diff[1] * diff[1] + diff[2] * diff[2] > neighb_thresh) {
                         return;
                     }
-                    if (checkNNDist(background, image, new_r, new_c, val, size, nn_dist_thresh)) {
-                        absimg.at<uint8_t>(new_r, new_c) = compid;
-                        curCompVis.push_back(new_id);
-                        stk.push_back(curCompVis.back());
-                    } else {
-                        absimg.at<uint8_t>(new_r, new_c) = INVALID;
-                    }
+                    absimg.at<uint8_t>(new_r, new_c) = compid;
+                    curCompVis.push_back(new_id);
+                    stk.push_back(curCompVis.back());
                 }
             };
 
-            for (int rr = 0 ; rr < image.rows; ++rr) {
+            for (int rr = 0; rr < image.rows; ++rr) {
                 const cv::Vec3f* ptr = image.ptr<cv::Vec3f>(rr);
                 auto* outptr = absimg.ptr<uint8_t>(rr);
                 for (int cc = 0 ; cc < image.cols; ++cc) {
                     if (outptr[cc] != UNVISITED) continue;
-                    if (!checkNNDist(background, image, rr, cc, ptr[cc], size, nn_dist_thresh)) {
-                        outptr[cc] = INVALID;
-                        continue;
-                    }
                     outptr[cc] = compid;
                     stk.push_back((rr << 16) + cc);
                     curCompVis.clear();
@@ -96,6 +118,31 @@ namespace ark {
                     if (compid == UNVISITED) return absimg;
                 }
             }
+
+            top_left.x = image.cols - 1;
+            top_left.y = image.rows - 1;
+            bot_right.x = bot_right.y = 0;
+            for (int rr = 0; rr < image.rows; ++rr) {
+                auto* outptr = absimg.ptr<uint8_t>(rr);
+                bool nz = false;
+                for (int cc = 0 ; cc < image.cols; ++cc) {
+                    if (outptr[cc] != INVALID) {
+                        nz = true;
+                        top_left.x = std::min(top_left.x, cc);
+                        break;
+                    }
+                }
+                if (nz) {
+                    for (int cc = image.cols - 1; cc >= 0; --cc) {
+                        if (outptr[cc] != INVALID) {
+                            bot_right.x = std::max(bot_right.x, cc);
+                            break;
+                        }
+                    }
+                    if (top_left.y == image.rows - 1) top_left.y = rr;
+                    bot_right.y = rr;
+                }
+            }
             if (comps_by_size != nullptr) {
                 std::sort(comps_by_size->begin(), comps_by_size->end(), std::greater<std::array<int, 2> >());
             }
@@ -104,9 +151,8 @@ namespace ark {
     }
 
     cv::Mat BGSubtractor::run(const cv::Mat& image, std::vector<std::array<int, 2> >* comps_by_size) {
-        cv::Mat ffill_map = ffill(background, image, 1, 1200000.0 / (background.rows * background.cols) * nn_dist_thresh_rel,
-                                                        1200000.0 / (background.rows * background.cols) * neighb_thresh_rel,
-                                    comps_by_size);
-        return ffill_map;
+        return ffill(background, image, 1, numThreads, 1200000.0 / (background.rows * background.cols) * nnDistThreshRel,
+                                                        1200000.0 / (background.rows * background.cols) * neighbThreshRel,
+                                    comps_by_size, topLeft, botRight);
     }
 }

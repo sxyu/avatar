@@ -64,12 +64,19 @@ namespace ark {
         std::vector<cv::Mat> predict(const cv::Mat& depth);
 
         /** Predict best match for each pixel in image. Returns CV_8U Mat 
-         *  Do not call unless model has been trained or loaded
+         *  Do not call unless model has been trained or loaded.
+         *  Since this is quite performance critical, there are several
+         *  heuristic arguments to save computation:
          *  @param interval only computes for pixels with x = y = 0 mod interval
+         *  @param top_left top left of ROI to compute (by default, uses entire image)
+         *  @param bot_right bottom left of ROI to compute (by default, uses entire image)
          *  @param fill_in_gaps if interval is > 1, setting this to false leaves
          *  pixels not at the interval black. Otherwise fills with the computed pixel
          *  to the top left.  */
-        cv::Mat predictBest(const cv::Mat& depth, int num_threads, int interval = 1,
+        cv::Mat predictBest(const cv::Mat& depth, int num_threads,
+                int interval = 1,
+                cv::Point top_left = cv::Point(0,0),
+                cv::Point bot_right = cv::Point(-1, -1),
                 bool fill_in_gaps = true);
 
         /** Train from images and part-masks in OpenARK DataSet format,
@@ -143,7 +150,9 @@ namespace ark {
          * Then only the largest connected component for each body part label is kept
          * @param image input/output image
          * @param interval size of window to take majority vote of part labels. If interval is 1, no majority vote is used */
-        void postProcess(cv::Mat& image, int interval = 1) const;
+        void postProcess(cv::Mat& image, int interval = 1, int num_threads = 1,
+                cv::Point top_left = cv::Point(0,0),
+                cv::Point bot_right = cv::Point(-1, -1)) const;
 
         std::vector<RNode, Eigen::aligned_allocator<RNode> > nodes;
         std::vector<Distribution> leafData;

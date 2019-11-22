@@ -221,7 +221,7 @@ namespace ark {
             rgb_map_data[i][1] = color_data[i][1];
             rgb_map_data[i][2] = color_data[i][2];
         }
-        if (scale = 1.0) {
+        if (scale == 1.0) {
             rgb_map = rgb_map_large;
         }
         else {

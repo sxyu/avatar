@@ -4,6 +4,7 @@
 #include <chrono>
 #include <algorithm>
 #include <opencv2/core.hpp>
+#include <opencv2/imgproc.hpp>
 #include <opencv2/imgcodecs.hpp>
 #include <opencv2/highgui.hpp>
 #include <boost/program_options.hpp>
@@ -42,7 +43,7 @@ int main(int argc, char** argv) {
         ("no-occlusion", po::bool_switch(&disableOcclusion), "Disable occlusion detection in avatar optimizer prior to NN matching")
         ("betapose", po::value<float>(&betaPose)->default_value(0.14), "Optimization loss function: pose prior term weight")
         ("betashape", po::value<float>(&betaShape)->default_value(0.12), "Optimization loss function: shape prior term weight")
-        ("data-interval,I", po::value<int>(&interval)->default_value(12), "Only computes rtree weights and optimizes for pixels with x = y = 0 mod interval")
+        ("data-interval,I", po::value<int>(&interval)->default_value(20), "Only computes rtree weights and optimizes for pixels with x = y = 0 mod interval")
         ("nnstep", po::value<int>(&nnStep)->default_value(20), "Optimization nearest-neighbor step: only matches neighbors every x points; a heuristic to improve speed (currently, not used)")
         ("frame-icp-iters,t", po::value<int>(&frameICPIters)->default_value(3), "ICP iterations per frame")
         ("reinit-icp-iters,T", po::value<int>(&reinitICPIters)->default_value(6), "ICP iterations when reinitializing (at beginning/after tracking loss)")
@@ -112,6 +113,7 @@ int main(int argc, char** argv) {
     avaOpt.enableOcclusion = !disableOcclusion;
     avaOpt.maxItersPerICP = itersPerICP;
     ark::BGSubtractor bgsub(background);
+    bgsub.numThreads = std::thread::hardware_concurrency();
     std::vector<std::array<int, 2> > compsBySize;
 
     ark::RTree rtree(0);
@@ -135,61 +137,43 @@ int main(int argc, char** argv) {
         cv::Mat depth = image;
         if (image.channels() == 1) image = intrin.depthToXYZ(image);
         auto ccstart = std::chrono::high_resolution_clock::now();
-        cv::Mat sub = bgsub.run(image, &compsBySize);
+        BEGIN_PROFILE;
+        cv::Mat sub = bgsub.run(image,
+                rtreePath.empty() ? &compsBySize : nullptr);
+        PROFILE(BG Subtraction);
 
-        std::vector<int> colorid(256, 255);
-        for (int r = 0 ; r < compsBySize.size(); ++r) {
-            colorid[compsBySize[r][1]] = r;// > 0 ? 255 : 0;
-        }
         cv::Mat vis(sub.size(), CV_8UC3);
-        for (int r = 0 ; r < image.rows; ++r) {
-            auto* outptr = vis.ptr<cv::Vec3b>(r);
+        for (int r = bgsub.topLeft.y ; r <= bgsub.botRight.y; ++r) {
             const auto* inptr = sub.ptr<uint8_t>(r);
             auto* dptr = depth.ptr<float>(r);
-            for (int c = 0 ; c < image.cols; ++c) {
-                int colorIdx = colorid[inptr[c]];
-                if (colorIdx >= 254) {
-                    if (rtreePath.empty()) outptr[c] = 0;
+            for (int c = bgsub.topLeft.x ; c <= bgsub.botRight.x; ++c) {
+                if (inptr[c] >= 254) {
                     dptr[c] = 0.0f;
                 }
-                else if (rtreePath.empty())
-                    outptr[c] = ark::util::paletteColor(colorIdx, true);
             }
         }
+        PROFILE(Apply foreground mask to depth);
 
         if (rtreePath.size()) {
             vis.setTo(cv::Vec3b(0,0,0));
-            BEGIN_PROFILE;
-            cv::Mat result = rtree.predictBest(depth, std::thread::hardware_concurrency(), 2);
-            rtree.postProcess(result);
+            cv::Mat result = rtree.predictBest(depth, std::thread::hardware_concurrency(), 2, bgsub.topLeft, bgsub.botRight);
             PROFILE(RTree inference);
+            rtree.postProcess(result, 2, std::thread::hardware_concurrency(), bgsub.topLeft, bgsub.botRight);
+            PROFILE(RTree postproc);
             if (rtreeOnly) {
-                for (int r = 0; r < depth.rows; ++r) {
+                for (int r = bgsub.topLeft.y; r <= bgsub.botRight.y; ++r) {
                     auto* inPtr = result.ptr<uint8_t>(r);
                     auto* visualPtr = vis.ptr<cv::Vec3b>(r);
-                    for (int c = 0; c < depth.cols; ++c){
+                    for (int c = bgsub.topLeft.x; c <= bgsub.botRight.x; ++c){
                         if (inPtr[c] == 255) continue;
                         visualPtr[c] = ark::util::paletteColor(inPtr[c], true);
                     }
                 }
             } else {
-                // Sparsify
-                if (interval > 1) {
-                    for (int rr = 0 ; rr < result.rows; rr += interval) {
-                        for (int cc = 0 ; cc < result.cols; cc += interval) {
-                            uint8_t* ptr = result.ptr<uint8_t>(rr);
-                            memset(ptr + cc + 1, 255, interval - 1);
-                        }
-                        for (int r = rr + 1; r < rr + interval; ++r) {
-                            uint8_t* ptr = result.ptr<uint8_t>(r);
-                            memset(ptr, 255, result.cols);
-                        }
-                    }
-                }
                 size_t cnz = 0;
-                for (int r = 0; r < depth.rows; ++r) {
+                for (int r = bgsub.topLeft.y ; r <= bgsub.botRight.y; r += interval) {
                     auto* partptr = result.ptr<uint8_t>(r);
-                    for (int c = 0; c < depth.cols; ++c) {
+                    for (int c = bgsub.topLeft.x; c <= bgsub.botRight.x; c += interval) {
                         if (partptr[c] == 255) continue;
                         ++cnz;
                     }
@@ -198,10 +182,10 @@ int main(int argc, char** argv) {
                     ark::CloudType dataCloud(3, cnz);
                     Eigen::VectorXi dataPartLabels(cnz);
                     size_t i = 0;
-                    for (int r = 0; r < depth.rows; ++r) {
+                    for (int r = bgsub.topLeft.y ; r <= bgsub.botRight.y; r += interval) {
                         auto* ptr = image.ptr<cv::Vec3f>(r);
                         auto* partptr = result.ptr<uint8_t>(r);
-                        for (int c = 0; c < depth.cols; ++c) {
+                        for (int c = bgsub.topLeft.x; c <= bgsub.botRight.x; c += interval) {
                             if (partptr[c] == 255) continue;
                             dataCloud(0, i) = ptr[c][0];
                             dataCloud(1, i) = -ptr[c][1];
@@ -246,14 +230,33 @@ int main(int argc, char** argv) {
                     printf("Overall: %f ms\n", std::chrono::duration<double, std::milli>(std::chrono::high_resolution_clock::now() - ccstart).count());
                 }
             }
-        }
-        for (int r = 0 ; r < image.rows; ++r) {
-            auto* outptr = vis.ptr<cv::Vec3b>(r);
-            const auto* rgbptr = imageRGB.ptr<cv::Vec3b>(r);
-            for (int c = 0 ; c < image.cols; ++c) {
-                outptr[c] = rgbptr[c] / 3 + (outptr[c] - rgbptr[c]) / 3 * 2;
+            for (int r = 0 ; r < image.rows; ++r) {
+                auto* outptr = vis.ptr<cv::Vec3b>(r);
+                const auto* rgbptr = imageRGB.ptr<cv::Vec3b>(r);
+                for (int c = 0 ; c < image.cols; ++c) {
+                    outptr[c] = rgbptr[c] / 3 + (outptr[c] - rgbptr[c]) / 3 * 2;
+                }
+            }
+        } else {
+            std::vector<int> colorid(256, 255);
+            for (int r = 0 ; r < compsBySize.size(); ++r) {
+                colorid[compsBySize[r][1]] = r;// > 0 ? 255 : 0;
+            }
+            for (int r = 0 ; r < image.rows; ++r) {
+                auto* outptr = vis.ptr<cv::Vec3b>(r);
+                const auto* inptr = sub.ptr<uint8_t>(r);
+                for (int c = 0 ; c < image.cols; ++c) {
+                    int colorIdx = colorid[inptr[c]];
+                    if (colorIdx >= 254) {
+                        outptr[c] = 0;
+                    }
+                    else {
+                        outptr[c] = ark::util::paletteColor(colorIdx, true);
+                    }
+                }
             }
         }
+        // cv::rectangle(vis, bgsub.topLeft, bgsub.botRight, cv::Scalar(0,0,255));
 
         cv::imshow("Visual", vis);
         // cv::imshow("Depth", depth);

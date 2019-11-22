@@ -49,7 +49,7 @@ namespace ark {
          *  Background pixels have value -1.
          *  Assumes camera is at 0,0,0 and looking in positive z direction
          **/
-        cv::Mat renderFaces(const cv::Size& image_size) const;
+        cv::Mat renderFaces(const cv::Size& image_size, int num_threads = 1) const;
 
         /** Clear all caches. You must call this whenever avatar parameters change.
          *  Note: this only changes internal cache state and is thus considered a

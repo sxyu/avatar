@@ -3,6 +3,7 @@
 #include <vector>
 #include <mutex>
 #include <atomic>
+#include <thread>
 #include <iostream>
 #include <Eigen/StdVector>
 #include <ceres/ceres.h>
@@ -244,7 +245,9 @@ namespace ark {
                         bool new_evaluation_point) final {
                     // std::cerr << "PREP " << evaluate_jacobians << ", " << new_evaluation_point << "\n";
                     if (new_evaluation_point) {
+                        // BEGIN_PROFILE;
                         if (shapeEnabled || !shapeComputed) CalcShape();
+                        // PROFILE(CalcShape);
                         jointVecInit.col(0).noalias() = ava.p;
 
                         for (int i = 0; i < numJointSpaces - 1; ++i) {
@@ -256,6 +259,7 @@ namespace ark {
                                 x(1), -x(0),  x(3),
                                 -x(0), -x(1), -x(2);
                         }
+                        // PROFILE(lojac);
 
                         // Compute relative rotations and translations
                         R(-1, -1).setIdentity(); // -1 means 'to global'
@@ -271,6 +275,7 @@ namespace ark {
                                 if (j == -1) break;
                             }
                         }
+                        // PROFILE(RT);
 
                         if (shapeEnabled) {
                             // Compute joint-to-parent accumulated shape differences
@@ -278,6 +283,7 @@ namespace ark {
                                 H[j].noalias() = R(-1, ava.model.parent[j]) * Sp[j] + H[ava.model.parent[j]];
                             }
                         }
+                        // PROFILE(H);
 
                         std::atomic<size_t> cacheId(0);
                         auto worker = [evaluate_jacobians, &cacheId, this](int workerId) {
@@ -289,13 +295,15 @@ namespace ark {
                             }
                         };
 
-                        std::vector<boost::thread> threadPool;
+                        std::vector<std::thread> threadPool;
                         for (int i = 0; i < numThreads; ++i) {
                             threadPool.emplace_back(worker, i);
                         }
                         for (auto& thread : threadPool) {
                             thread.join();
                         }
+                        // PROFILE(Caches);
+                        // PROFILE(ALL Prepare);
                     }
                 }
 
@@ -476,6 +484,7 @@ namespace ark {
                         Eigen::Vector3d u = q.vec() * 2;
                         // Quaternion-vector rotation (pseudo-)Jacobian
                         double w = q.w() * 2;
+                        dRot.setZero();
                         dRot << 
                             u(1)*v(1) + v(2)*u(2)    ,
                             w*v(2)    + u(0)*v(1)   - 2*u(1)*v(0),
@@ -491,7 +500,7 @@ namespace ark {
                             -w*v(0)    - 2*u(1)*v(2) + v(1)*u(2),
                             u(0)*v(0) + v(1)*u(1),
                             u(0)*v(1) - v(0)*u(1);
-
+icpJacobian[i].setZero();
                         icpJacobian[i].noalias() = commonData.R(-1, ava.model.parent[j]) * dRot
 #ifndef TEST_COMPARE_AUTO_DIFF
                             * commonData.localJacobian[j]
@@ -654,7 +663,7 @@ namespace ark {
                     Eigen::Matrix<T, 3, Eigen::Dynamic> cloud(3, commonData.ava.model.numPoints());
                     Eigen::Map<Eigen::Matrix<T, Eigen::Dynamic, 1> > cloudVec(cloud.data(), cloud.rows() * cloud.cols());
 
-                    if (commonData.shape_enabled) {
+                    if (commonData.shapeEnabled) {
                         Eigen::Map<const Eigen::Matrix<T, Eigen::Dynamic, 1> > wMap(params[commonData.ava.model.numJoints() + 1], commonData.ava.model.numShapeKeys(), 1);
                         cloudVec.noalias() = commonData.ava.model.keyClouds.cast<T>() * wMap + commonData.ava.model.baseCloud;
                     } else {
@@ -668,7 +677,7 @@ namespace ark {
                         jointPos.resize(3, commonData.ava.model.numJoints());
                         Eigen::Map<Eigen::Matrix<T, Eigen::Dynamic, 1> > jointPosVec(jointPos.data(), 3 * commonData.ava.model.numJoints());
 
-                        if (commonData.shape_enabled) {
+                        if (commonData.shapeEnabled) {
                             Eigen::Map<const Eigen::Matrix<T, Eigen::Dynamic, 1> > wMap(params[commonData.ava.model.numJoints() + 1], commonData.ava.model.numShapeKeys(), 1);
                             jointPosVec.noalias() = commonData.ava.model.jointShapeRegBase.cast<T>() + commonData.ava.model.jointShapeReg.cast<T>() * wMap; 
                         } else {
@@ -720,6 +729,7 @@ namespace ark {
                 std::vector<std::vector<int> > & correspondences,
                 std::vector<std::unique_ptr<KdTree>>& part_kd,
                 int nn_step,
+                int num_threads,
                 bool invert = false) {
 
             if (invert) {
@@ -728,17 +738,47 @@ namespace ark {
                 // match each data point to a model point
                 typedef nanoflann::KDTreeEigenColMajorMatrixAdaptor<
                     CloudType, 3, nanoflann::metric_L2_Simple> KdTree;
-                std::vector<std::unique_ptr<KdTree>> modelPartKD;
+
                 const size_t numParts = model_part_indices.size();
-                for (size_t i = 0; i < numParts; ++i) {
-                    const auto& indices = model_part_indices[i];
-                    auto& partCloud = model_part_clouds[i];
-                    for (int j = 0; j < indices.rows(); ++j) {
-                        int k = indices[j];
-                        partCloud.col(j).noalias() = model_cloud.col(k);
+                std::vector<KdTree*> modelPartKD(numParts);
+                std::vector<std::vector<int>> newModelPartIndices(numParts);
+                {
+                    std::atomic<int> part(0);
+                    auto worker = [&]() {
+                        int i = 0;
+                        while (true) {
+                            i = part++;
+                            if (i >= numParts) break;
+                            const auto& indices = model_part_indices[i];
+                            int cnt = 0;
+                            for (int j = 0; j < indices.rows(); ++j) {
+                                int k = indices[j];
+                                if (point_visible[k]) ++cnt;
+                            }
+                            auto& partCloud = model_part_clouds[i];
+                            if (cnt == 0) {
+                                modelPartKD[i] = nullptr;
+                                continue;
+                            }
+                            partCloud.resize(3, cnt);
+                            cnt = 0;
+                            for (int j = 0; j < indices.rows(); ++j) {
+                                int k = indices[j];
+                                if (!point_visible[k]) continue;
+                                partCloud.col(cnt++).noalias() = model_cloud.col(k);
+                                newModelPartIndices[i].push_back(k);
+                            }
+                            modelPartKD[i] = new KdTree(model_part_clouds[i], 10);
+                            modelPartKD[i]->index->buildIndex();
+                        }
+                    };
+                    std::vector<std::thread> thds;
+                    for (int i = 0; i < num_threads; ++i) {
+                        thds.emplace_back(worker);
                     }
-                    modelPartKD.emplace_back(new KdTree(model_part_clouds[i], 10));
-                    modelPartKD.back()->index->buildIndex();
+                    for (int i = 0; i < num_threads; ++i) {
+                        thds[i].join();
+                    }
                 }
 
                 correspondences.resize(model_cloud.cols());
@@ -748,14 +788,18 @@ namespace ark {
                 for (int i = 0; i < data_cloud.cols(); ++i) {
                     resultSet.init(&index, &dist);
                     const int partId = data_part_labels[i];
+                    if (modelPartKD[partId] == nullptr) continue;
                     modelPartKD[partId]
                         ->index->findNeighbors(
                                 resultSet,
                                 data_cloud.data() + i * 3,
                                 nanoflann::SearchParams(10));
                     correspondences[
-                        model_part_indices[partId][index]
+                        newModelPartIndices[partId][index]
                     ].push_back(i);
+                }
+                for (int i = 0; i < numParts; ++i) {
+                    delete modelPartKD[i];
                 }
                 // const int MAX_CORRES_PER_POINT = 1;
                 // for (int i = 0; i < model_cloud.cols(); ++i) {
@@ -829,7 +873,8 @@ namespace ark {
                 pcl::PointXYZRGBA pt;
                 pt.getVector3fMap() = common.ava.cloud.col(i).cast<float>();
                 if (!point_visible[i]) {
-                    pt.r = pt.g = pt.b = 100;
+                    // pt.r = pt.g = pt.b = 100;
+                    continue;
                 }  else {
                     pt.r = 255;
                     pt.g = 0;
@@ -940,7 +985,7 @@ namespace ark {
             for (int k = 0; k < opt.ava.model.numJoints(); ++k) {
                 cost_function->AddParameterBlock(4);
             }
-            if (common.shape_enabled) {
+            if (common.shapeEnabled) {
                 cost_function->AddParameterBlock(opt.ava.model.numShapeKeys());
             }
             cost_function->SetNumResiduals(3);
@@ -954,13 +999,12 @@ namespace ark {
             for (auto& ances : common.ancestor[model_point_id]) {
                 params.push_back(opt.r[ances.jid].coeffs().data());
             }
-
-            fullParams.push_back(common.ava.p.data());
+fullParams.push_back(common.ava.p.data());
             for (int i = 0; i < opt.ava.model.numJoints(); ++i) {
                 fullParams.push_back(opt.r[i].coeffs().data());
             }
 
-            if (common.shape_enabled) {
+            if (common.shapeEnabled) {
                 params.push_back(common.ava.w.data());
                 fullParams.push_back(common.ava.w.data());
             }
@@ -990,7 +1034,7 @@ namespace ark {
                 int cols = 3+(i>0);
                 if (i+1 == params.size()) cols = opt.ava.model.numShapeKeys();
                 std::cerr << "BLOCK " << i;
-                if (i>0 && (i < params.size()-1 || !common.shape_enabled)) std::cerr << " -> " << common.ancestor[model_point_id][i-1].jid + 1;
+                if (i>0 && (i < params.size()-1 || !common.shapeEnabled)) std::cerr << " -> " << common.ancestor[model_point_id][i-1].jid + 1;
                 std::cerr << "\n";
                 for (int j = 0; j < 3; ++j) {
                     for (int k = 0; k < cols; ++k) {
@@ -1007,7 +1051,7 @@ namespace ark {
                 int cols = 3+(i>0);
                 if (i+1 == fullParams.size()) cols = opt.ava.model.numShapeKeys();
                 bool good = false;
-                if (i && (i < fullParams.size() - 1 || !common.shape_enabled)) {
+                if (i && (i < fullParams.size() - 1 || !common.shapeEnabled)) {
                     for (auto& ances : common.ancestor[model_point_id]) {
                         if (ances.jid == i-1) {
                             good = true;
@@ -1152,7 +1196,7 @@ namespace ark {
         // options.line_search_type = ceres::ARMIJO;
         //options.max_linear_solver_iterations = num_subiter;
         options.max_num_iterations = maxItersPerICP;
-        // options.num_threads = common.numThreads;
+        options.num_threads = 1;//common.numThreads;
         options.function_tolerance = 1e-4;
         options.dense_linear_algebra_library_type = ceres::DenseLinearAlgebraLibraryType::LAPACK;
 
@@ -1164,12 +1208,33 @@ namespace ark {
         for (int icp_iter = 0; icp_iter < icp_iters; ++icp_iter) {
             // Perform point cloud occlusion detection
             BEGIN_PROFILE;
-            renderer.update();
             if (enableOcclusion) {
                 std::fill(pointVisible.begin(), pointVisible.end(), false);
-                cv::Mat facesMap = renderer.renderFaces(imageSize);
+                // Remove back faces
+                for (int f = 0; f < ava.model.mesh.cols(); ++f) {
+                    int i1 = ava.model.mesh(0, f);
+                    int i2 = ava.model.mesh(1, f);
+                    int i3 = ava.model.mesh(2, f);
+                    auto p1 = ava.cloud.col(i1);
+                    auto p2 = ava.cloud.col(i2);
+                    auto p3 = ava.cloud.col(i3);
+
+                    if (((p2-p1).cross(p1-p3)).z() > 1e-4) {
+                        pointVisible[i1] = pointVisible[i2] = pointVisible[i3] = true;
+                    }
+
+                    // pointVisible[faces[ptr[c]].second[0]]
+                    //     = pointVisible[faces[ptr[c]].second[1]]
+                }
+                                
+                /*
+                // True occlusion (e.g. hand occluding the body)
+                // too slow, not useful probably
+                // can perhaps do better
+                // renderer.update();
+                cv::Mat facesMap = renderer.renderFaces(imageSize, num_threads); // 12 ms
                 const auto& faces = renderer.getOrderedFaces();
-                for (int r = 0; r < facesMap.rows; ++r) {
+                for (int r = 0; r < facesMap.rows; ++r) { // loop: 3ms
                     auto* ptr = facesMap.ptr<int32_t>(r);
                     for (int c = 0; c < facesMap.cols; ++c) {
                         if (~ptr[c]) {
@@ -1179,6 +1244,7 @@ namespace ark {
                         }
                     }
                 }
+                */
                 PROFILE(>> Occlusion);
             }
 
@@ -1187,7 +1253,8 @@ namespace ark {
                     ava.cloud, modelPartLabels, modelPartIndices,
                     modelPartClouds,
                     pointVisible, correspondences, partKD, nnStep,
-                    /*invert*/ true);
+                    num_threads,
+                    /*invert*/ true); // 3.3 ms
             PROFILE(>> NN Corresponences);
             
             using namespace ceres;
@@ -1202,13 +1269,12 @@ namespace ark {
                 problem.AddParameterBlock(ava.w.data(),
                         ava.model.numShapeKeys());
             }
+            PROFILE(>> Construct problem: parameter blocks);
             common.caches.clear();
             //std::vector<std::tuple<ceres::ResidualBlockId, int, int> > residuals;
             std::vector<std::vector<double*> > pointParams(ava.model.numPoints());
-            size_t totalResiduals = 0;
             for (int i = 0; i < ava.model.numPoints(); ++i)  {
                 if (correspondences[i].empty()) continue;
-                totalResiduals += correspondences[i].size();
                 auto& params = pointParams[i];
                 common.caches.emplace_back(common, i);
                 params.reserve(common.ancestor[i].size() + 1);
@@ -1221,10 +1287,6 @@ namespace ark {
                 }
             }
 
-            /** Scale the function weights according to number of ICP type residuals. Otherwise the function terms become extremely imbalanced in some cases. */
-            common.scaledBetaPose = betaPose * std::sqrt(totalResiduals) / 15.;
-            common.scaledBetaShape = betaShape * std::sqrt(totalResiduals) / 15.;
-            PROFILE(>> Construct problem: parameter blocks);
             // // DEBUG
             // std::vector<double*> params;
             // params.push_back(ava.p.data());
@@ -1233,8 +1295,10 @@ namespace ark {
             // }
             // //END DEBUG
             int cid = 0;
+            size_t totalResiduals = 0;
             for (int i = 0; i < ava.model.numPoints(); ++i)  {
                 if (correspondences[i].empty()) continue;
+                totalResiduals += correspondences[i].size();
                 for (int j : correspondences[i]) {
                     problem.AddResidualBlock(
                             new AvatarICPCostFunctor(common, cid, data_cloud, j),
@@ -1242,6 +1306,10 @@ namespace ark {
                 }
                 ++cid;
             }
+
+            /** Scale the function weights according to number of ICP type residuals. Otherwise the function terms become extremely imbalanced in some cases. */
+            common.scaledBetaPose = betaPose * std::sqrt(totalResiduals) / 15.;
+            common.scaledBetaShape = betaShape * std::sqrt(totalResiduals) / 15.;
 
             std::vector<double*> posePriorParams;
             posePriorParams.reserve(ava.model.numJoints() - 1);
@@ -1264,7 +1332,7 @@ namespace ark {
             Solver::Summary summary;
             // PROFILE(>> Render in PCL);
 
-            ceres::Solve(options, &problem, &summary);
+            ceres::Solve(options, &problem, &summary); // 35 ms
 
             PROFILE(>> Solve);
 

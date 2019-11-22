@@ -66,15 +66,33 @@ namespace {
             return (getDepth(depth_image, uti) - getDepth(depth_image, vti));
     }
 
-    void upscaleGrid(cv::Mat& image, int interval) {
-        for (int rr = 0 ; rr < image.rows; rr += interval) {
-            uint8_t* ptrRef = image.ptr<uint8_t>(rr);
-            for (int r = rr ; r < rr + interval; ++r) {
-                uint8_t* ptr = image.ptr<uint8_t>(r);
-                for (int cc = 0 ; cc < image.cols; cc += interval) {
-                    uint8_t val = ptrRef[cc];
-                    memset(ptr + cc, val, interval);
+    void upscaleGrid(cv::Mat& image, int interval, int num_threads,
+            const cv::Point& top_left, const cv::Point& bot_right) {
+        {
+            std::atomic<int> row(top_left.y);
+            auto worker = [&] () {
+                int rr = 0;
+                while (true) {
+                    rr = (row += interval);
+                    if (rr > bot_right.y) break;
+
+                    uint8_t* ptrRef = image.ptr<uint8_t>(rr);
+                    for (int r = rr ; r < rr + interval; ++r) {
+                        if (r > bot_right.y) break; 
+                        uint8_t* ptr = image.ptr<uint8_t>(r);
+                        for (int cc = top_left.x ; cc <= bot_right.x; cc += interval) {
+                            uint8_t val = ptrRef[cc];
+                            memset(ptr + cc, val, interval);
+                        }
+                    }
                 }
+            };
+            std::vector<std::thread> thds;
+            for (int i = 0; i < num_threads; ++i) {
+                thds.emplace_back(worker);
+            }
+            for (int i = 0; i < num_threads; ++i) {
+                thds[i].join();
             }
         }
     }
@@ -104,13 +122,14 @@ namespace {
         }
     }
 
-    void suppressPartNonMax(cv::Mat& image, int interval, int num_parts) {
+    void suppressPartNonMax(cv::Mat& image, int interval, int num_parts, int num_threads, const cv::Point& top_left, const cv::Point& bot_right) {
         const int VISITED_OFFSET = 128;
 
         std::vector<int> stk, curCompVis;
         std::vector<std::vector<int> > bestComp(num_parts);
-        stk.reserve(image.rows * image.cols);
-        curCompVis.reserve(image.rows * image.cols);
+        stk.reserve((bot_right.x - top_left.x + 1) *
+                (bot_right.y - top_left.y + 1) / interval / interval);
+        curCompVis.reserve(stk.capacity());
         int hi_bit = (1<<16);
         int lo_mask = hi_bit - 1;
         hi_bit *= interval;
@@ -124,9 +143,9 @@ namespace {
             }
         };
 
-        for (int rr = 0 ; rr < image.rows; rr += interval) {
+        for (int rr = top_left.y ; rr <= bot_right.y; rr += interval) {
             uint8_t* ptr = image.ptr<uint8_t>(rr);
-            for (int cc = 0 ; cc < image.cols; cc += interval) {
+            for (int cc = top_left.x; cc <= bot_right.x; cc += interval) {
                 uint8_t val = ptr[cc];
                 if (val >= VISITED_OFFSET) continue;
 
@@ -138,10 +157,10 @@ namespace {
                     int id = stk.back();
                     const int cur_r = (id >> 16), cur_c = (id & lo_mask);
                     stk.pop_back();
-                    if (cur_r >= interval) maybe_visit(cur_r, cur_c, val, cur_r - interval, cur_c, id - hi_bit);
-                    if (cur_r < image.rows - interval) maybe_visit(cur_r, cur_c, val, cur_r + 1, cur_c, id + hi_bit);
-                    if (cur_c >= interval) maybe_visit(cur_r, cur_c, val, cur_r, cur_c - interval, id - interval);
-                    if (cur_c < image.cols - interval) maybe_visit(cur_r, cur_c, val, cur_r, cur_c + interval, id + interval);
+                    if (cur_r >= top_left.y + interval) maybe_visit(cur_r, cur_c, val, cur_r - interval, cur_c, id - hi_bit);
+                    if (cur_r <= bot_right.y- interval) maybe_visit(cur_r, cur_c, val, cur_r + 1, cur_c, id + hi_bit);
+                    if (cur_c >= top_left.x + interval) maybe_visit(cur_r, cur_c, val, cur_r, cur_c - interval, id - interval);
+                    if (cur_c <= bot_right.y - interval) maybe_visit(cur_r, cur_c, val, cur_r, cur_c + interval, id + interval);
                 }
                 if (curCompVis.size() > bestComp[val].size()) {
                     for (int id : bestComp[val]) {
@@ -157,12 +176,36 @@ namespace {
                 }
             }
         }
-        for (int rr = 0 ; rr < image.rows; ++rr) {
-            uint8_t* ptr = image.ptr<uint8_t>(rr);
-            for (int cc = 0 ; cc < image.cols; ++cc) {
-                uint8_t& val = ptr[cc];
-                if (val >= VISITED_OFFSET && val != 255)
-                    val -= VISITED_OFFSET;
+        // for (int rr = 0 ; rr < image.rows; ++rr) {
+        //     uint8_t* ptr = image.ptr<uint8_t>(rr);
+        //     for (int cc = 0 ; cc < image.cols; ++cc) {
+        //         uint8_t& val = ptr[cc];
+        //         if (val >= VISITED_OFFSET && val != 255)
+        //             val -= VISITED_OFFSET;
+        //     }
+        // }
+        //
+        {
+            std::atomic<int> row(top_left.y);
+            auto worker = [&] () {
+                int r = 0;
+                while (true) {
+                    r = row++;
+                    if (r > bot_right.y) break;
+                    uint8_t* ptr = image.ptr<uint8_t>(r);
+                    for (int cc = top_left.x; cc <= bot_right.x; ++cc) {
+                        uint8_t& val = ptr[cc];
+                        if (val >= VISITED_OFFSET && val != 255)
+                            val -= VISITED_OFFSET;
+                    }
+                }
+            };
+            std::vector<std::thread> thds;
+            for (int i = 0; i < num_threads; ++i) {
+                thds.emplace_back(worker);
+            }
+            for (int i = 0; i < num_threads; ++i) {
+                thds[i].join();
             }
         }
     }
@@ -3018,21 +3061,28 @@ namespace ark {
         return result;
     }
 
-    cv::Mat RTree::predictBest(const cv::Mat& depth, int num_threads, int interval, bool fill_in_gaps) {
+    cv::Mat RTree::predictBest(const cv::Mat& depth, int num_threads, int interval,
+            cv::Point top_left,
+            cv::Point bot_right,
+            bool fill_in_gaps) {
         cv::Mat result(depth.size(), CV_8U);
         result.setTo(255);
-        std::atomic<int> row(0);
+        if (bot_right.x == -1) {
+            bot_right.x = depth.cols - 1;
+            bot_right.y = depth.rows - 1;
+        }
+        std::atomic<int> row(top_left.y);
         auto worker = [&]() {
             Vec2i pix;
             uint8_t* ptr;
             int r;
             while(true) {
                 r = (row += interval);
-                if (r >= depth.rows) break;
+                if (r > bot_right.y) break;
                 pix(1) = r;
                 ptr = result.ptr<uint8_t>(r);
                 const auto* inPtr = depth.ptr<float>(r);
-                for (int c = 0; c < depth.cols; c += interval) {
+                for (int c = top_left.x; c <= bot_right.x; c += interval) {
                     if (inPtr[c] == 0.f) continue;
                     pix(0) = c;
                     int nodeid = 0;
@@ -3050,9 +3100,23 @@ namespace ark {
                         vti[1] = static_cast<int32_t>(std::round(vt.y()));
                         uti += pix.cast<int32_t>(); vti += pix.cast<int32_t>();
 
-                        float score = (getDepth(depth, uti) - getDepth(depth, vti));
+                        float zu, zv;
+                        if (uti.x() < top_left.x || uti.y() < top_left.y ||
+                            uti.x() > bot_right.x || uti.y() > bot_right.y) {
+                            zu = ark::RTree::BACKGROUND_DEPTH;
+                        } else {
+                            zu = depth.at<float>(uti.y(), uti.x());
+                            if (zu == 0.0) zu = ark::RTree::BACKGROUND_DEPTH;
+                        }
+                        if (vti.x() < top_left.x || vti.y() < top_left.y ||
+                            vti.x() > bot_right.x || vti.y() > bot_right.y) {
+                            zv = ark::RTree::BACKGROUND_DEPTH;
+                        } else {
+                            zv = depth.at<float>(vti.y(), vti.x());
+                            if (zv == 0.0) zv = ark::RTree::BACKGROUND_DEPTH;
+                        }
 
-                        if (score < node.thresh) {
+                        if (zu - zv < node.thresh) {
                             nodeid = node.lnode;
                         } else {
                             nodeid = node.rnode;
@@ -3072,7 +3136,7 @@ namespace ark {
         }
 
         if (fill_in_gaps && interval > 1) {
-            upscaleGrid(result, interval);
+            upscaleGrid(result, interval, num_threads, top_left, bot_right);
         }
         return result;
     }
@@ -3235,10 +3299,17 @@ namespace ark {
         }
     }
 
-    void RTree::postProcess(cv::Mat& image, int interval) const {
+    void RTree::postProcess(cv::Mat& image, int interval,
+            int num_threads, cv::Point top_left, cv::Point bot_right) const {
+        if (bot_right.x == -1) {
+            bot_right.x = image.cols - 1;
+            bot_right.y = image.rows - 1;
+        }
         // if (interval > 1) majorityGrid(image, interval, numParts);
-        suppressPartNonMax(image, interval, numParts);
-        if (interval > 1) upscaleGrid(image, interval);
+        suppressPartNonMax(image, interval, numParts, num_threads,
+                top_left, bot_right);
+        if (interval > 1) upscaleGrid(image, interval, num_threads,
+                top_left, bot_right);
     }
 
     void RTree::updateBestMatchTable() {

@@ -57,7 +57,7 @@ int main(int argc, char ** argv) {
         ("betapose", po::value<float>(&betaPose)->default_value(0.14), "Optimization loss function: pose prior term weight")
         ("betashape", po::value<float>(&betaShape)->default_value(0.12), "Optimization loss function: shape prior term weight")
         ("nnstep", po::value<int>(&nnStep)->default_value(20), "Optimization nearest-neighbor step: only matches neighbors every x points; a heuristic to improve speed (currently, not used)")
-        ("data-interval,I", po::value<int>(&interval)->default_value(12), "Only computes rtree weights and optimizes for pixels with x = y = 0 mod interval")
+        ("data-interval,I", po::value<int>(&interval)->default_value(20), "Only computes rtree weights and optimizes for pixels with x = y = 0 mod interval")
         ("frame-icp-iters,t", po::value<int>(&frameICPIters)->default_value(3), "ICP iterations per frame")
         ("reinit-icp-iters,T", po::value<int>(&reinitICPIters)->default_value(5), "ICP iterations when reinitializing (after tracking loss)")
         ("initial-icp-iters,e", po::value<int>(&initialICPIters)->default_value(7), "ICP iterations when reinitializing (at beginning)")
@@ -80,9 +80,9 @@ int main(int argc, char ** argv) {
     po::positional_options_description posopt;
     posopt.add("rtree", 1);
     try {
-        po::store(po::command_line_parser(argc, argv).options(descCombined) 
-                .positional(posopt).run(), 
-                vm); 
+        po::store(po::command_line_parser(argc, argv).options(descCombined)
+                .positional(posopt).run(),
+                vm);
     } catch (std::exception& e) {
         std::cerr << "Error: " << e.what() << "\n";
         std::cerr << descPositional << "\n" << desc << "\n";
@@ -103,10 +103,12 @@ int main(int argc, char ** argv) {
         return 1;
     }
 
-	printf("CONTROLS:\nQ or ESC to quit\nb to set background\nSPACE to start/pause\n\n");
+	printf("CONTROLS:\nQ or ESC to quit\n"
+            "b to set background (also sets when unpausing)\n"
+            "SPACE to start/pause\n\n");
 
-	// seed the rng
-	srand(time(NULL));
+	// Seed the rng
+    srand(time(NULL));
 
     CameraIntrin intrin;
     if (!intrinPath.empty()) intrin.readFile(intrinPath);
@@ -122,18 +124,16 @@ int main(int argc, char ** argv) {
     ark::Avatar ava(avaModel);
     ark::AvatarOptimizer avaOpt(ava, intrin, size, numParts,
                                 ark::part_map::SMPL_JOINT_TO_PART_MAP);
-    avaOpt.betaPose = betaPose; 
+    avaOpt.betaPose = betaPose;
     avaOpt.betaShape = betaShape;
     avaOpt.nnStep = nnStep;
     avaOpt.enableOcclusion = !disableOcclusion;
     avaOpt.maxItersPerICP = itersPerICP;
     ark::BGSubtractor bgsub{cv::Mat()};
+    bgsub.numThreads = std::thread::hardware_concurrency();
 
     ark::RTree rtree(0);
     if (rtreePath.size()) rtree.loadFile(rtreePath);
-
-    std::vector<std::array<int, 2> > compsBySize;
-    std::vector<int> colorid(256, 255);
 
     // initialize the camera
     DepthCamera::Ptr camera;
@@ -155,7 +155,8 @@ int main(int argc, char ** argv) {
 
     // This indicates if we are reinitializing for the first time
     bool firstTime = true;
-    std::cerr << "Note: paused, press space to begin recording (will capture background when unpausing).\n";
+    std::cerr << "Note: paused, press space to begin recording.\n"
+        "The background (for BG subtraction) will be captured automatically each time you unpause.\nPlease stay out of the grayish area (where depth is unavailable) if possible.\n";
 
     int currFrame = 0; // current frame number (since launch/last pause)
     while (true)
@@ -182,133 +183,147 @@ int main(int argc, char ** argv) {
                 // show 'paused' and do not record
                 cv::rectangle(rgbMap, rect, RECT_COLOR, -1);
                 cv::putText(rgbMap, NO_SIGNAL_STR, STR_POS, 0, 0.8, cv::Scalar(255, 255, 255), 1, cv::LINE_AA);
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
                 // cv::rectangle(xyzMap, rect, RECT_COLOR / 255.0, -1);
                 // cv::putText(xyzMap, NO_SIGNAL_STR, STR_POS, 0, 0.8, cv::Scalar(1.0f, 1.0f, 1.0f), 1, cv::LINE_AA);
             }
             else {
-                // store images
+                // Capture image if timestamp changed
                 auto ts = static_cast<AzureKinectCamera*>(camera.get())->getTimestamp();
-                if (timestamps.size() && ts - timestamps.back() < 100000) continue;
+                if (timestamps.size() && ts - timestamps.back() < 100000) {
+                    continue;
+                }
 
             }
+
             cv::Mat depth;
             cv::extractChannel(xyzMap, depth, 2);
             // visualize
             cv::Mat visual, rgbMapFloat;
             if (!pause) {
                 if (!bgsub.background.empty()) {
-                    cv::Mat sub = bgsub.run(xyzMap, &compsBySize);
-                    for (int r = 0 ; r < compsBySize.size(); ++r) {
-                        colorid[compsBySize[r][1]] = r;// > 0 ? 255 : 0;
-                    }
-                    for (int r = 0 ; r < xyzMap.rows; ++r) {
-                        auto* outptr = rgbMap.ptr<cv::Vec3b>(r);
+                    cv::Mat sub = bgsub.run(xyzMap);
+                    size_t subCnz = 0;
+                    for (int r = bgsub.topLeft.y ; r <= bgsub.botRight.y; ++r) {
+                        // auto* outptr = rgbMap.ptr<cv::Vec3b>(r);
                         const auto* inptr = sub.ptr<uint8_t>(r);
                         auto* dptr = depth.ptr<float>(r);
-                        for (int c = 0 ; c < xyzMap.cols; ++c) {
-                            int colorIdx = colorid[inptr[c]];
+                        for (int c = bgsub.topLeft.x ; c <= bgsub.botRight.x; ++c) {
+                            int colorIdx = inptr[c];
                             if (colorIdx >= 254) {
                                 dptr[c] = 0;
+                            } else {
+                                ++subCnz;
                             }
                         }
                     }
-                }
 
-                cv::Mat result = rtree.predictBest(depth, std::thread::hardware_concurrency(), 2);
-                rtree.postProcess(result);
-                if (rtreeOnly) {
-                    for (int r = 0; r < depth.rows; ++r) {
-                        auto* inPtr = result.ptr<uint8_t>(r);
-                        auto* visualPtr = rgbMap.ptr<cv::Vec3b>(r);
-                        for (int c = 0; c < depth.cols; ++c){
-                            if (inPtr[c] == 255) continue;
-                            visualPtr[c] = visualPtr[c] / 3.0 + ark::util::paletteColor(inPtr[c], true) * 2.0 / 3.0;
+                    if (subCnz < reinitCnz / (interval * interval)) {
+                        if (reinit == false) {
+                            std::cout << "Note: detected empty scene, decreasing frame rate\n";
+                            reinit = true;
                         }
-                    }
-                }
-                else {
-                    // Sparsify
-                    if (interval > 1) {
-                        for (int rr = 0 ; rr < result.rows; rr += interval) {
-                            for (int cc = 0 ; cc < result.cols; cc += interval) {
-                                uint8_t* ptr = result.ptr<uint8_t>(rr);
-                                memset(ptr + cc + 1, 255, interval - 1);
-                            }
-                            for (int r = rr + 1; r < rr + interval; ++r) {
-                                uint8_t* ptr = result.ptr<uint8_t>(r);
-                                memset(ptr, 255, result.cols);
-                            }
-                        }
-                    }
-                    Eigen::Matrix<size_t, Eigen::Dynamic, 1> partCnz(numParts);
-                    partCnz.setZero();
-                    for (int r = 0; r < depth.rows; ++r) {
-                        auto* partptr = result.ptr<uint8_t>(r);
-                        for (int c = 0; c < depth.cols; ++c) {
-                            if (partptr[c] == 255) continue;
-                            ++partCnz[partptr[c]];
-                        }
-                    }
-                    size_t cnz = partCnz.sum();
-                    if ((firstTime && partCnz.minCoeff() < std::max(1, initialPerPartCnz / (interval*interval))) || cnz < reinitCnz / (interval * interval)) {
-                        reinit = true;
+                        std::this_thread::sleep_for(std::chrono::milliseconds(100));
                     }
                     else {
-                        ark::CloudType dataCloud(3, cnz);
-                        Eigen::VectorXi dataPartLabels(cnz);
-                        size_t i = 0;
-                        for (int r = 0; r < depth.rows; ++r) {
-                            auto* ptr = xyzMap.ptr<cv::Vec3f>(r);
-                            auto* partptr = result.ptr<uint8_t>(r);
-                            for (int c = 0; c < depth.cols; ++c) {
-                                if (partptr[c] == 255) continue;
-                                dataCloud(0, i) = ptr[c][0];
-                                dataCloud(1, i) = -ptr[c][1];
-                                dataCloud(2, i) = ptr[c][2];
-                                dataPartLabels(i) = partptr[c];
-                                ++i;
+                        cv::Mat result = rtree.predictBest(depth, std::thread::hardware_concurrency(), 2, bgsub.topLeft, bgsub.botRight);
+                        rtree.postProcess(result, 2, std::thread::hardware_concurrency(), bgsub.topLeft, bgsub.botRight);
+                        if (rtreeOnly) {
+                            for (int r = bgsub.topLeft.y; r <= bgsub.botRight.y; ++r) {
+                                auto* inPtr = result.ptr<uint8_t>(r);
+                                auto* visualPtr = rgbMap.ptr<cv::Vec3b>(r);
+                                for (int c = bgsub.topLeft.x; c <= bgsub.botRight.x; ++c){
+                                    if (inPtr[c] == 255) continue;
+                                    visualPtr[c] = ark::util::paletteColor(inPtr[c], true);
+                                }
                             }
                         }
-                        int icpIters = frameICPIters;
-                        if (reinit) {
-                            Eigen::Vector3d cloudCen = dataCloud.rowwise().mean();
-                            ava.p = cloudCen;
-                            ava.w.setZero();
-                            for (int i = 1; i < ava.model.numJoints(); ++i) {
-                                ava.r[i].setIdentity();
+                        else {
+                            Eigen::Matrix<size_t, Eigen::Dynamic, 1> partCnz(numParts);
+                            partCnz.setZero();
+                            for (int r = bgsub.topLeft.y; r <= bgsub.botRight.y; ++r) {
+                                auto* partptr = result.ptr<uint8_t>(r);
+                                for (int c = bgsub.topLeft.x; c <= bgsub.botRight.x; c += interval) {
+                                    if (partptr[c] == 255) continue;
+                                    ++partCnz[partptr[c]];
+                                }
                             }
-                            ava.r[0] = Eigen::AngleAxisd(M_PI, Eigen::Vector3d(0, 1, 0)).toRotationMatrix();
-                            reinit = false;
-                            ava.update();
-                            icpIters = firstTime ? initialICPIters : reinitICPIters;
-                            std::cerr << "Note: reinitializing tracking\n";
-                            if (firstTime) firstTime = false;
-                        }
-                        BEGIN_PROFILE;
-                        avaOpt.optimize(dataCloud, dataPartLabels,
-                                icpIters,
-                                std::thread::hardware_concurrency());
-                        PROFILE(Optimize (Total));
-                        ark::AvatarRenderer rend(ava, intrin);
-                        cv::Mat modelMap = rend.renderDepth(depth.size());
-                        cv::Vec3b whiteColor(255, 255, 255);
-                        for (int r = 0 ; r < rgbMap.rows; ++r) {
-                            auto* outptr = rgbMap.ptr<cv::Vec3b>(r);
-                            const auto* renderptr = modelMap.ptr<float>(r);
-                            for (int c = 0 ; c < rgbMap.cols; ++c) {
-                                if (renderptr[c] > 0.0) {
-                                    outptr[c] = whiteColor * (std::min(1.0, renderptr[c] / 3.0) * 4 / 5) +
-                                        outptr[c] / 5;
+                            size_t cnz = partCnz.sum();
+                            if ((firstTime && partCnz.minCoeff() < std::max(1, initialPerPartCnz / (interval*interval))) || cnz < reinitCnz / (interval * interval)) {
+                                reinit = true;
+                            }
+                            else {
+                                ark::CloudType dataCloud(3, cnz);
+                                Eigen::VectorXi dataPartLabels(cnz);
+                                size_t i = 0;
+                                for (int r = bgsub.topLeft.y ; r <= bgsub.botRight.y; r += interval) {
+                                    auto* ptr = xyzMap.ptr<cv::Vec3f>(r);
+                                    auto* partptr = result.ptr<uint8_t>(r);
+                                    for (int c = bgsub.topLeft.x; c <= bgsub.botRight.x; c += interval) {
+                                        if (partptr[c] == 255) continue;
+                                        dataCloud(0, i) = ptr[c][0];
+                                        dataCloud(1, i) = -ptr[c][1];
+                                        dataCloud(2, i) = ptr[c][2];
+                                        dataPartLabels(i) = partptr[c];
+                                        ++i;
+                                    }
+                                }
+                                int icpIters = frameICPIters;
+                                if (reinit) {
+                                    Eigen::Vector3d cloudCen = dataCloud.rowwise().mean();
+                                    ava.p = cloudCen;
+                                    ava.w.setZero();
+                                    for (int i = 1; i < ava.model.numJoints(); ++i) {
+                                        ava.r[i].setIdentity();
+                                    }
+                                    ava.r[0] = Eigen::AngleAxisd(M_PI, Eigen::Vector3d(0, 1, 0)).toRotationMatrix();
+                                    reinit = false;
+                                    ava.update();
+                                    icpIters = firstTime ? initialICPIters : reinitICPIters;
+                                    std::cerr << "Note: reinitializing tracking\n";
+                                    if (firstTime) firstTime = false;
+                                }
+                                BEGIN_PROFILE;
+                                avaOpt.optimize(dataCloud, dataPartLabels,
+                                        icpIters,
+                                        std::thread::hardware_concurrency());
+                                PROFILE(Optimize (Total));
+                                ark::AvatarRenderer rend(ava, intrin);
+                                cv::Mat modelMap = rend.renderDepth(depth.size());
+                                cv::Vec3b whiteColor(200, 200, 255);
+                                for (int r = 0 ; r < rgbMap.rows; ++r) {
+                                    auto* outptr = rgbMap.ptr<cv::Vec3b>(r);
+                                    const auto* renderptr = modelMap.ptr<float>(r);
+                                    for (int c = 0 ; c < rgbMap.cols; ++c) {
+                                        if (renderptr[c] > 0.0) {
+                                            outptr[c] = whiteColor *
+                                                (std::min(1.0, renderptr[c] / 3.0) * 4 / 5) +
+                                                outptr[c] / 5;
+                                        }
+                                    }
                                 }
                             }
                         }
                     }
                 }
-
             }
             rgbMap.convertTo(rgbMapFloat, CV_32FC3, 1. / 255.);
             // cv::hconcat(xyzMap, rgbMapFloat, visual);
             visual = rgbMapFloat;
+            for (int r = 0 ; r < visual.rows; ++r) {
+                auto* outptr = visual.ptr<cv::Vec3f>(r);
+                auto* xyzptr = xyzMap.ptr<cv::Vec3f>(r);
+                for (int c = 0 ; c < visual.cols; ++c) {
+                    if (xyzptr[c][2] == 0.0f) {
+                        // Since depth camera's FoV is actually
+                        // smaller than RGB FoV visible,
+                        // try to make user aware of
+                        // depth boundaries by darkening areas with
+                        // no depth info
+                        outptr[c] *= 0.5;
+                    }
+                }
+            }
             const int MAX_COLS = 1300;
             if (visual.cols > MAX_COLS) {
                 cv::resize(visual, visual, cv::Size(MAX_COLS, MAX_COLS * visual.rows / visual.cols));

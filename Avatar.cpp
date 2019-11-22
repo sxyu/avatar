@@ -318,7 +318,7 @@ namespace {
 }
 
 namespace ark {
-    AvatarModel::AvatarModel(const std::string & model_dir) : MODEL_DIR(model_dir) {
+    AvatarModel::AvatarModel(const std::string & model_dir, bool limit_one_joint_per_point) : MODEL_DIR(model_dir) {
         using namespace boost::filesystem;
         path modelPath = model_dir.empty() ? util::resolveRootPath("data/avatar-model") : model_dir;
         path skelPath = modelPath / "skeleton.txt";
@@ -370,13 +370,24 @@ namespace ark {
             for (int j = 0; j < nEntries; ++j) {
                 int joint; double w;
                 skel >> joint >> w;
-                assignedPoints[joint].emplace_back(w, i);
                 assignedJoints[i].emplace_back(w, joint);
             }
             std::sort(assignedJoints[i].begin(), assignedJoints[i].end(), [](const std::pair<double, int>& a, const std::pair<double, int>& b) {
                         return a.first > b.first;
                     });
-            totalAssignments += nEntries;
+            if (limit_one_joint_per_point) {
+                assignedJoints[i].resize(1);
+                assignedJoints[i].shrink_to_fit();
+                assignedJoints[i][0].first = 1.0;
+                assignedPoints[assignedJoints[i][0].second]
+                    .emplace_back(1.0, i);
+            } else {
+                for (int j = 0; j < nEntries; ++j) {
+                    assignedPoints[assignedJoints[i][j].second]
+                        .emplace_back(assignedJoints[i][j].first, i);
+                }
+            }
+            totalAssignments += assignedJoints[i].size();
         }
 
         size_t totalPoints = 0;
@@ -758,7 +769,8 @@ namespace ark {
         return partMaskMap;
     }
 
-    cv::Mat AvatarRenderer::renderFaces(const cv::Size& image_size) const {
+    cv::Mat AvatarRenderer::renderFaces(const cv::Size& image_size,
+            int num_threads) const {
         const auto& projected = getProjectedPoints();
         const auto& faces = getOrderedFaces();
 

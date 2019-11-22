@@ -11,12 +11,18 @@ namespace ark {
         cv::Mat run(const cv::Mat& image, std::vector<std::array<int, 2> >* comps_by_size = nullptr);
 
         /** Minimum distance to neighbor in background image to consider a point foreground */
-        float nn_dist_thresh_rel = 0.005;
+        float nnDistThreshRel = 0.005;
 
         /** Max squared distance to a neighbor, for flood fill */
-        float neighb_thresh_rel = 0.005;
+        float neighbThreshRel = 0.005;
+
+        /** Max allowed number of threads for background subtractor */
+        int numThreads = 1;
 
         /** The background image */
         cv::Mat background;
+
+        /** Current top left and bottom right points of foreground */
+        cv::Point topLeft, botRight;
     };
 }
