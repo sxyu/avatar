@@ -4,6 +4,7 @@
 #include <opencv2/core.hpp>
 
 namespace ark {
+    struct CameraIntrin;
     namespace util {
         /**
         * Splits a string into components based on a delimiter
@@ -69,6 +70,25 @@ namespace ark {
          *  @return (fx, cx, fy, cy)
          */
         cv::Vec4d getCameraIntrinFromXYZ(const cv::Mat & xyz_map);
+
+        /** Read a '.depth' raw depth map file into an OpenCV Mat
+         *  @param allow_exr if true, checks if the file format is exr,
+         *                   in which case does cv::imread instead
+         *  */
+        void readDepth(const std::string & path, cv::Mat & m,
+                bool allow_exr = true);
+
+        /** Read a '.depth' raw depth map file into an OpenCV Mat as XYZ map;
+         *  if image already has 3 channels then reads directly
+         *  @param allow_exr if true, checks if the file format is exr,
+         *                   in which case does cv::imread instead
+         *  */
+        void readXYZ(const std::string & path, cv::Mat & m,
+                const CameraIntrin& intrin,
+                bool allow_exr = true);
+
+        /** Write a .depth raw depth map file from an OpenCV Mat */
+        void writeDepth(const std::string & image_path, cv::Mat & depth_map);
     } // util
 
     // Randomization utilities

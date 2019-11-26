@@ -96,12 +96,11 @@ int main(int argc, char** argv) {
     std::stringstream ss_bg_id;
     ss_bg_id << std::setw(padSize) << std::setfill('0') << std::to_string(bgId);
     std::string bgPath = (path(datasetPath) / "depth_exr" / ("depth_" + ss_bg_id.str() + ".exr")).string();
-    cv::Mat background = cv::imread(bgPath, cv::IMREAD_ANYCOLOR | cv::IMREAD_ANYDEPTH);
+    cv::Mat background; ark::util::readXYZ(bgPath, background, intrin);
     if (background.empty()) {
         std::cerr << "ERROR: empty background image. Incorrect path/ID out of bounds/pad size incorrect (specify -p)?\n";
         return 1;
     }
-    if (background.channels() == 1) background = intrin.depthToXYZ(background);
 
     ark::AvatarModel avaModel;
     ark::Avatar ava(avaModel);
@@ -119,23 +118,25 @@ int main(int argc, char** argv) {
     ark::RTree rtree(0);
     if (rtreePath.size()) rtree.loadFile(rtreePath);
 
+    // Previous centers of mass: required by RTree postprocessor
+    Eigen::Matrix<double, 2, Eigen::Dynamic> comPre;
+
     bool reinit = true;
 
     while (true) {
-        // std::cerr << imId << " LOAD\n";
         std::stringstream ss_img_id;
         ss_img_id << std::setw(padSize) << std::setfill('0') << std::to_string(imId);
 
         std::string inPath = (path(datasetPath) / "depth_exr" / ("depth_" + ss_img_id.str() + ".exr")).string();
-        cv::Mat image = cv::imread(inPath, cv::IMREAD_ANYCOLOR | cv::IMREAD_ANYDEPTH);
+        cv::Mat image; ark::util::readXYZ(inPath, image, intrin);
         std::string inPathRGB = (path(datasetPath) / "rgb" / ("rgb_" + ss_img_id.str() + ".jpg")).string();
         cv::Mat imageRGB = cv::imread(inPathRGB);
         if (image.empty() || imageRGB.empty()) {
             std::cerr << "WARNING: no more images found, exiting\n";
             break;
         }
-        cv::Mat depth = image;
-        if (image.channels() == 1) image = intrin.depthToXYZ(image);
+        cv::Mat depth;
+        cv::extractChannel(image, depth, 2);
         auto ccstart = std::chrono::high_resolution_clock::now();
         BEGIN_PROFILE;
         cv::Mat sub = bgsub.run(image,
@@ -158,7 +159,7 @@ int main(int argc, char** argv) {
             vis.setTo(cv::Vec3b(0,0,0));
             cv::Mat result = rtree.predictBest(depth, std::thread::hardware_concurrency(), 2, bgsub.topLeft, bgsub.botRight);
             PROFILE(RTree inference);
-            rtree.postProcess(result, 2, std::thread::hardware_concurrency(), bgsub.topLeft, bgsub.botRight);
+            rtree.postProcess(result, comPre, 2, std::thread::hardware_concurrency(), bgsub.topLeft, bgsub.botRight);
             PROFILE(RTree postproc);
             if (rtreeOnly) {
                 for (int r = bgsub.topLeft.y; r <= bgsub.botRight.y; ++r) {

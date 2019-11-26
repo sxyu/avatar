@@ -78,7 +78,7 @@ namespace {
 
                     uint8_t* ptrRef = image.ptr<uint8_t>(rr);
                     for (int r = rr ; r < rr + interval; ++r) {
-                        if (r > bot_right.y) break; 
+                        if (r > bot_right.y) break;
                         uint8_t* ptr = image.ptr<uint8_t>(r);
                         for (int cc = top_left.x ; cc <= bot_right.x; cc += interval) {
                             uint8_t val = ptrRef[cc];
@@ -113,7 +113,7 @@ namespace {
                 cnt.maxCoeff(&argmax);
                 if (argmax == num_parts) argmax = 255;
 
-                uint8_t bestPartId = argmax; 
+                uint8_t bestPartId = argmax;
                 for (int r = rr ; r < rr + interval; ++r) {
                     uint8_t* ptr = image.ptr<uint8_t>(r);
                     memset(ptr + cc, bestPartId, interval);
@@ -122,11 +122,22 @@ namespace {
         }
     }
 
-    void suppressPartNonMax(cv::Mat& image, int interval, int num_parts, int num_threads, const cv::Point& top_left, const cv::Point& bot_right) {
+    void suppressPartNonMax(cv::Mat& image, int interval, int num_parts, int num_threads, const cv::Point& top_left, const cv::Point& bot_right,
+            Eigen::Matrix<double, 2, Eigen::Dynamic>& com_pre,
+            double dist_to_pre_weight) {
         const int VISITED_OFFSET = 128;
 
         std::vector<int> stk, curCompVis;
         std::vector<std::vector<int> > bestComp(num_parts);
+
+        Eigen::VectorXd bestScore(num_parts);
+        bestScore.setZero();
+
+        Eigen::Matrix<double, 2, Eigen::Dynamic> comBest(2, num_parts);
+        comBest.setZero();
+
+        Eigen::Vector2d com(2);
+
         stk.reserve((bot_right.x - top_left.x + 1) *
                 (bot_right.y - top_left.y + 1) / interval / interval);
         curCompVis.reserve(stk.capacity());
@@ -153,16 +164,28 @@ namespace {
                 stk.push_back((rr << 16) + cc);
                 curCompVis.clear();
                 curCompVis.push_back(stk.back());
+                com.setZero();
+                Eigen::Vector2d pt;
+                bool hasPrevCom = com_pre(0, val) >= 0.;
                 while (stk.size()) {
                     int id = stk.back();
-                    const int cur_r = (id >> 16), cur_c = (id & lo_mask);
+                    int cur_c = (id & lo_mask), cur_r = (id >> 16);
                     stk.pop_back();
                     if (cur_r >= top_left.y + interval) maybe_visit(cur_r, cur_c, val, cur_r - interval, cur_c, id - hi_bit);
                     if (cur_r <= bot_right.y- interval) maybe_visit(cur_r, cur_c, val, cur_r + 1, cur_c, id + hi_bit);
                     if (cur_c >= top_left.x + interval) maybe_visit(cur_r, cur_c, val, cur_r, cur_c - interval, id - interval);
                     if (cur_c <= bot_right.x - interval) maybe_visit(cur_r, cur_c, val, cur_r, cur_c + interval, id + interval);
+                    pt << cur_c, cur_r;
+                    com += pt;
                 }
-                if (curCompVis.size() > bestComp[val].size()) {
+                double score = curCompVis.size();
+                com /= curCompVis.size();
+                if (hasPrevCom) {
+                    score += (com - com_pre.col(val)).squaredNorm() * dist_to_pre_weight;
+                }
+                if (score > bestScore(val)) {
+                    bestScore[val] = score;
+                    comBest.col(val) = com;
                     for (int id : bestComp[val]) {
                         const int cr = (id >> 16), cc = (id & lo_mask);
                         image.at<uint8_t>(cr, cc) = 255;
@@ -174,6 +197,14 @@ namespace {
                         image.at<uint8_t>(cr, cc) = 255;
                     }
                 }
+            }
+        }
+
+        for (int i = 0; i < num_parts; ++i) {
+            if (bestComp[i].empty()) {
+                com_pre(0, i) = -1.;
+            } else {
+                com_pre.col(i) = comBest.col(i);
             }
         }
         // for (int rr = 0 ; rr < image.rows; ++rr) {
@@ -3217,10 +3248,10 @@ namespace ark {
             int num_images,
             const int* part_map
             ) {
-        
+
         Eigen::Matrix<uint64_t, Eigen::Dynamic, Eigen::Dynamic> newLeafData(numParts, leafData.size());
         newLeafData.setZero();
-        
+
         {
             AvatarDataSource dataSource(avatar_model, pose_seq, intrin, image_size, num_images, part_map);
             std::atomic<size_t> atomicImageCnt(0);
@@ -3299,15 +3330,24 @@ namespace ark {
         }
     }
 
-    void RTree::postProcess(cv::Mat& image, int interval,
-            int num_threads, cv::Point top_left, cv::Point bot_right) const {
+    void RTree::postProcess(cv::Mat& image,
+            Eigen::Matrix<double, 2, Eigen::Dynamic>& com_pre,
+            int interval,
+            int num_threads,
+            cv::Point top_left, cv::Point bot_right,
+            double dist_to_pre_weight) const {
         if (bot_right.x == -1) {
             bot_right.x = image.cols - 1;
             bot_right.y = image.rows - 1;
         }
+        if (com_pre.cols() != numParts) {
+            com_pre.resize(2, numParts);
+            com_pre.topRows<1>().setConstant(-1.);
+            com_pre.bottomRows<1>().setZero();
+        }
         // if (interval > 1) majorityGrid(image, interval, numParts);
         suppressPartNonMax(image, interval, numParts, num_threads,
-                top_left, bot_right);
+                top_left, bot_right, com_pre, dist_to_pre_weight);
         if (interval > 1) upscaleGrid(image, interval, num_threads,
                 top_left, bot_right);
     }

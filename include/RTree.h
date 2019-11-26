@@ -1,4 +1,4 @@
-#pragma once 
+#pragma once
 
 #include <vector>
 #include <memory>
@@ -148,11 +148,21 @@ namespace ark {
          * to get higher confidence results.
          * First (optionally) a majority vote is taken in each interval^2 window to get smoother body part labels. 
          * Then only the largest connected component for each body part label is kept
-         * @param image input/output image
-         * @param interval size of window to take majority vote of part labels. If interval is 1, no majority vote is used */
-        void postProcess(cv::Mat& image, int interval = 1, int num_threads = 1,
+         * @param image Input/output image
+         * @param com_pre Stores the centers of mass of each body part
+         * at the previous time step; is written to by the function.
+         * Should be 2 x numParts, if not matrix is resized automatically
+         * by function. If part is not found, x coordinate is set to -1.
+         * @param interval size of window to take majority vote of part labels.
+         * If interval is 1, no majority vote is used
+         * @param dist_to_pre_weight Weight of squared distance to previous
+         * center of mass term when finding best cluster for each body part */
+        void postProcess(cv::Mat& image,
+                Eigen::Matrix<double, 2, Eigen::Dynamic>& com_pre,
+                int interval = 1, int num_threads = 1,
                 cv::Point top_left = cv::Point(0,0),
-                cv::Point bot_right = cv::Point(-1, -1)) const;
+                cv::Point bot_right = cv::Point(-1, -1),
+                double dist_to_pre_weight = 0.001) const;
 
         std::vector<RNode, Eigen::aligned_allocator<RNode> > nodes;
         std::vector<Distribution> leafData;

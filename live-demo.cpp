@@ -40,10 +40,10 @@ int main(int argc, char ** argv) {
     namespace po = boost::program_options;
     /** Number of body parts from part map, used in rtree, etc. */
     const int numParts = 16;
-    std::string intrinPath, rtreePath;
+    std::string intrinPath, rtreePath, bgPath;
     int nnStep, interval, frameICPIters, reinitICPIters, initialICPIters;
     int initialPerPartCnz, reinitCnz, itersPerICP;
-    float betaPose, betaShape;
+    float betaPose, betaShape, nnDistThreshRel, neighbDistThreshRel, distToPreWeight;
     bool rtreeOnly, disableOcclusion;
     cv::Size size;
 
@@ -63,8 +63,12 @@ int main(int argc, char ** argv) {
         ("initial-icp-iters,e", po::value<int>(&initialICPIters)->default_value(7), "ICP iterations when reinitializing (at beginning)")
         ("inner-iters,p", po::value<int>(&itersPerICP)->default_value(10), "Maximum inner iterations per ICP step")
         ("intrin-path,i", po::value<std::string>(&intrinPath)->default_value(""), "Path to camera intrinsics file (default: uses hardcoded K4A intrinsics)")
+        ("bg-path,b", po::value<std::string>(&bgPath)->default_value(""), "Path to background image")
         ("initial-per-part-thresh", po::value<int>(&initialPerPartCnz)->default_value(80), "Initial detected points per body part (/interval^2) to start tracking avatar")
         ("min-points,M", po::value<int>(&reinitCnz)->default_value(1000), "Minimum number of detected body points to allow continued tracking; if it falls below this number, then the tracker reinitializes")
+        ("nn-dist,N", po::value<float>(&nnDistThreshRel)->default_value(0.002), "Min distance (scales with image size) between background pixel and current pixel")
+        ("neighb-dist,n", po::value<float>(&neighbDistThreshRel)->default_value(0.001), "Min distance (scales with image size) between neighboring pixels in same component, for BG subtraction")
+        ("dist-to-pre-weight", po::value<float>(&distToPreWeight)->default_value(0.001), "Weight of squared to distance to previous center of mass when choosing best connected component for each body part (RTree postprocessing)")
         ("width", po::value<int>(&size.width)->default_value(1280), "Width of generated images")
         ("height", po::value<int>(&size.height)->default_value(720), "Height of generated imaes")
     ;
@@ -104,7 +108,7 @@ int main(int argc, char ** argv) {
     }
 
 	printf("CONTROLS:\nQ or ESC to quit\n"
-            "b to set background (also sets when unpausing)\n"
+            "b to set background (also sets on first unpause, if -b not specified)\n"
             "SPACE to start/pause\n\n");
 
 	// Seed the rng
@@ -131,17 +135,25 @@ int main(int argc, char ** argv) {
     avaOpt.maxItersPerICP = itersPerICP;
     ark::BGSubtractor bgsub{cv::Mat()};
     bgsub.numThreads = std::thread::hardware_concurrency();
+    bgsub.nnDistThreshRel = nnDistThreshRel;
+    bgsub.neighbThreshRel = neighbDistThreshRel;
+    if (bgPath.size()) {
+        util::readXYZ(bgPath, bgsub.background, intrin);
+    }
 
     ark::RTree rtree(0);
     if (rtreePath.size()) rtree.loadFile(rtreePath);
 
-    // initialize the camera
+    // Previous centers of mass: required by RTree postprocessor
+    Eigen::Matrix<double, 2, Eigen::Dynamic> comPre;
+
+    // Initialize the camera
     DepthCamera::Ptr camera;
 
     camera = std::make_shared<AzureKinectCamera>();
     auto capture_start_time = std::chrono::high_resolution_clock::now();
 
-    // turn on the camera
+    // Turn on the camera
     camera->beginCapture();
 
     // Read in camera input and save it to the buffer
@@ -159,6 +171,7 @@ int main(int argc, char ** argv) {
         "The background (for BG subtraction) will be captured automatically each time you unpause.\nPlease stay out of the grayish area (where depth is unavailable) if possible.\n";
 
     int currFrame = 0; // current frame number (since launch/last pause)
+
     while (true)
     {
         ++currFrame;
@@ -227,7 +240,6 @@ int main(int argc, char ** argv) {
                     }
                     else {
                         cv::Mat result = rtree.predictBest(depth, std::thread::hardware_concurrency(), 2, bgsub.topLeft, bgsub.botRight);
-                        rtree.postProcess(result, 2, std::thread::hardware_concurrency(), bgsub.topLeft, bgsub.botRight);
                         if (rtreeOnly) {
                             for (int r = bgsub.topLeft.y; r <= bgsub.botRight.y; ++r) {
                                 auto* inPtr = result.ptr<uint8_t>(r);
@@ -239,6 +251,7 @@ int main(int argc, char ** argv) {
                             }
                         }
                         else {
+                            rtree.postProcess(result, comPre, 2, std::thread::hardware_concurrency(), bgsub.topLeft, bgsub.botRight, distToPreWeight);
                             Eigen::Matrix<size_t, Eigen::Dynamic, 1> partCnz(numParts);
                             partCnz.setZero();
                             for (int r = bgsub.topLeft.y; r <= bgsub.botRight.y; r += interval) {
@@ -325,7 +338,7 @@ int main(int argc, char ** argv) {
                 }
             }
             const int MAX_COLS = 1300;
-            // cv::rectangle(visual, bgsub.topLeft, bgsub.botRight, cv::Scalar(0,0,255));
+            cv::rectangle(visual, bgsub.topLeft, bgsub.botRight, cv::Scalar(0,0,255));
             if (visual.cols > MAX_COLS) {
                 cv::resize(visual, visual, cv::Size(MAX_COLS, MAX_COLS * visual.rows / visual.cols));
             }
@@ -346,8 +359,10 @@ int main(int argc, char ** argv) {
             break;
         }
         else if (c == ' ') {
-            bgsub.background = xyzMap;
-            std::cout << "Note: unpaused, background updated.\n";
+            if (bgsub.background.empty()) {
+                bgsub.background = xyzMap;
+                std::cout << "Note: unpaused, background updated.\n";
+            }
             pause = !pause;
             if (pause) reinit = true;
         }
