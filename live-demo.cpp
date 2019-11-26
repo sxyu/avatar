@@ -227,7 +227,7 @@ int main(int argc, char ** argv) {
                     }
                     else {
                         cv::Mat result = rtree.predictBest(depth, std::thread::hardware_concurrency(), 2, bgsub.topLeft, bgsub.botRight);
-                        rtree.postProcess(result, 1, std::thread::hardware_concurrency(), bgsub.topLeft, bgsub.botRight);
+                        rtree.postProcess(result, 2, std::thread::hardware_concurrency(), bgsub.topLeft, bgsub.botRight);
                         if (rtreeOnly) {
                             for (int r = bgsub.topLeft.y; r <= bgsub.botRight.y; ++r) {
                                 auto* inPtr = result.ptr<uint8_t>(r);
