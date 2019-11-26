@@ -90,7 +90,7 @@ int main(int argc, char** argv) {
         std::cerr << "WARNING: min_samples (-m) cannot be less than 1, defaulting to 1...\n";
         min_samples = 1;
     }
-    ark::RTree rtree(16);
+    ark::RTree rtree(ark::part_map::_COUNT);
     if (data_path == "://SMPLSYNTH") {
         ark::AvatarModel model;
         ark::AvatarPoseSequence poseSequence;
