@@ -227,7 +227,7 @@ int main(int argc, char ** argv) {
                     }
                     else {
                         cv::Mat result = rtree.predictBest(depth, std::thread::hardware_concurrency(), 2, bgsub.topLeft, bgsub.botRight);
-                        rtree.postProcess(result, 2, std::thread::hardware_concurrency(), bgsub.topLeft, bgsub.botRight);
+                        rtree.postProcess(result, 1, std::thread::hardware_concurrency(), bgsub.topLeft, bgsub.botRight);
                         if (rtreeOnly) {
                             for (int r = bgsub.topLeft.y; r <= bgsub.botRight.y; ++r) {
                                 auto* inPtr = result.ptr<uint8_t>(r);
@@ -241,7 +241,7 @@ int main(int argc, char ** argv) {
                         else {
                             Eigen::Matrix<size_t, Eigen::Dynamic, 1> partCnz(numParts);
                             partCnz.setZero();
-                            for (int r = bgsub.topLeft.y; r <= bgsub.botRight.y; ++r) {
+                            for (int r = bgsub.topLeft.y; r <= bgsub.botRight.y; r += interval) {
                                 auto* partptr = result.ptr<uint8_t>(r);
                                 for (int c = bgsub.topLeft.x; c <= bgsub.botRight.x; c += interval) {
                                     if (partptr[c] == 255) continue;
@@ -325,6 +325,7 @@ int main(int argc, char ** argv) {
                 }
             }
             const int MAX_COLS = 1300;
+            // cv::rectangle(visual, bgsub.topLeft, bgsub.botRight, cv::Scalar(0,0,255));
             if (visual.cols > MAX_COLS) {
                 cv::resize(visual, visual, cv::Size(MAX_COLS, MAX_COLS * visual.rows / visual.cols));
             }
@@ -335,7 +336,7 @@ int main(int argc, char ** argv) {
 
         // make case insensitive (convert to upper)
         if (c >= 'a' && c <= 'z') c &= 0xdf;
-        if (c == 'b') {
+        if (c == 'B') {
             bgsub.background = xyzMap;
             std::cout << "Note: background updated.\n";
         }
@@ -345,10 +346,8 @@ int main(int argc, char ** argv) {
             break;
         }
         else if (c == ' ') {
-            if (bgsub.background.empty()) {
-                bgsub.background = xyzMap;
-                std::cout << "Note: background updated.\n";
-            }
+            bgsub.background = xyzMap;
+            std::cout << "Note: unpaused, background updated.\n";
             pause = !pause;
             if (pause) reinit = true;
         }

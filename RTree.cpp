@@ -160,7 +160,7 @@ namespace {
                     if (cur_r >= top_left.y + interval) maybe_visit(cur_r, cur_c, val, cur_r - interval, cur_c, id - hi_bit);
                     if (cur_r <= bot_right.y- interval) maybe_visit(cur_r, cur_c, val, cur_r + 1, cur_c, id + hi_bit);
                     if (cur_c >= top_left.x + interval) maybe_visit(cur_r, cur_c, val, cur_r, cur_c - interval, id - interval);
-                    if (cur_c <= bot_right.y - interval) maybe_visit(cur_r, cur_c, val, cur_r, cur_c + interval, id + interval);
+                    if (cur_c <= bot_right.x - interval) maybe_visit(cur_r, cur_c, val, cur_r, cur_c + interval, id + interval);
                 }
                 if (curCompVis.size() > bestComp[val].size()) {
                     for (int id : bestComp[val]) {
