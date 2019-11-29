@@ -181,7 +181,7 @@ namespace {
                 double score = curCompVis.size();
                 com /= curCompVis.size();
                 if (hasPrevCom) {
-                    score += (com - com_pre.col(val)).squaredNorm() * dist_to_pre_weight;
+                    score -= (com - com_pre.col(val)).squaredNorm() * dist_to_pre_weight;
                 }
                 if (score > bestScore(val)) {
                     bestScore[val] = score;
