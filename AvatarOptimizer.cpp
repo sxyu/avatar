@@ -1083,7 +1083,7 @@ fullParams.push_back(common.ava.p.data());
     AvatarOptimizer::AvatarOptimizer(
             Avatar& ava, const CameraIntrin& intrin,
             const cv::Size& image_size,
-            int num_parts, const int* part_map)
+            int num_parts, const std::vector<int>& part_map)
         : ava(ava), intrin(intrin), imageSize(image_size),
           numParts(num_parts), partMap(part_map) {
         r.resize(ava.model.numJoints());

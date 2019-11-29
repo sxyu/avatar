@@ -23,7 +23,6 @@
 #include "AvatarRenderer.h"
 #include "BGSubtractor.h"
 #include "Calibration.h"
-#include "Config.h"
 #include "RTree.h"
 #include "Util.h"
 
@@ -38,8 +37,6 @@ using namespace ark;
 
 int main(int argc, char ** argv) {
     namespace po = boost::program_options;
-    /** Number of body parts from part map, used in rtree, etc. */
-    const int numParts = 16;
     std::string intrinPath, rtreePath, bgPath;
     int nnStep, interval, frameICPIters, reinitICPIters, initialICPIters;
     int initialPerPartCnz, reinitCnz, itersPerICP;
@@ -124,10 +121,12 @@ int main(int argc, char ** argv) {
         intrin.cy = 366.992;
     }
 
+    ark::RTree rtree(0);
+    if (rtreePath.size()) rtree.loadFile(rtreePath);
+
     ark::AvatarModel avaModel;
     ark::Avatar ava(avaModel);
-    ark::AvatarOptimizer avaOpt(ava, intrin, size, numParts,
-                                ark::part_map::SMPL_JOINT_TO_PART_MAP);
+    ark::AvatarOptimizer avaOpt(ava, intrin, size, rtree.numParts, rtree.partMap);
     avaOpt.betaPose = betaPose;
     avaOpt.betaShape = betaShape;
     avaOpt.nnStep = nnStep;
@@ -140,9 +139,6 @@ int main(int argc, char ** argv) {
     if (bgPath.size()) {
         util::readXYZ(bgPath, bgsub.background, intrin);
     }
-
-    ark::RTree rtree(0);
-    if (rtreePath.size()) rtree.loadFile(rtreePath);
 
     // Previous centers of mass: required by RTree postprocessor
     Eigen::Matrix<double, 2, Eigen::Dynamic> comPre;
@@ -252,7 +248,7 @@ int main(int argc, char ** argv) {
                         }
                         else {
                             rtree.postProcess(result, comPre, 2, std::thread::hardware_concurrency(), bgsub.topLeft, bgsub.botRight, distToPreWeight);
-                            Eigen::Matrix<size_t, Eigen::Dynamic, 1> partCnz(numParts);
+                            Eigen::Matrix<size_t, Eigen::Dynamic, 1> partCnz(rtree.numParts);
                             partCnz.setZero();
                             for (int r = bgsub.topLeft.y; r <= bgsub.botRight.y; r += interval) {
                                 auto* partptr = result.ptr<uint8_t>(r);

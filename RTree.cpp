@@ -240,6 +240,84 @@ namespace {
             }
         }
     }
+
+    void removeSmallPieces(cv::Mat& image, int interval, int num_parts, int num_threads, const cv::Point& top_left, const cv::Point& bot_right,
+            double thresh = 0.0005) {
+        const int VISITED_OFFSET = 128;
+
+        std::vector<int> stk, curCompVis;
+
+        size_t scaledThresh = image.rows * image.cols / (interval * interval) * thresh;
+
+        stk.reserve((bot_right.x - top_left.x + 1) *
+                (bot_right.y - top_left.y + 1) / interval / interval);
+        curCompVis.reserve(stk.capacity());
+        int hi_bit = (1<<16);
+        int lo_mask = hi_bit - 1;
+        hi_bit *= interval;
+
+        auto maybe_visit = [&](int curr_r, int curr_c, uint8_t curr_val, int new_r, int new_c, int new_id) {
+            uint8_t& val = image.at<uint8_t>(new_r, new_c);
+            if (curr_val == val) {
+                val += VISITED_OFFSET;
+                curCompVis.push_back(new_id);
+                stk.push_back(new_id);
+            }
+        };
+
+        for (int rr = top_left.y ; rr <= bot_right.y; rr += interval) {
+            uint8_t* ptr = image.ptr<uint8_t>(rr);
+            for (int cc = top_left.x; cc <= bot_right.x; cc += interval) {
+                uint8_t val = ptr[cc];
+                if (val >= VISITED_OFFSET) continue;
+
+                ptr[cc] += VISITED_OFFSET;
+                stk.push_back((rr << 16) + cc);
+                curCompVis.clear();
+                curCompVis.push_back(stk.back());
+                Eigen::Vector2d pt;
+                while (stk.size()) {
+                    int id = stk.back();
+                    int cur_c = (id & lo_mask), cur_r = (id >> 16);
+                    stk.pop_back();
+                    if (cur_r >= top_left.y + interval) maybe_visit(cur_r, cur_c, val, cur_r - interval, cur_c, id - hi_bit);
+                    if (cur_r <= bot_right.y- interval) maybe_visit(cur_r, cur_c, val, cur_r + 1, cur_c, id + hi_bit);
+                    if (cur_c >= top_left.x + interval) maybe_visit(cur_r, cur_c, val, cur_r, cur_c - interval, id - interval);
+                    if (cur_c <= bot_right.x - interval) maybe_visit(cur_r, cur_c, val, cur_r, cur_c + interval, id + interval);
+                    pt << cur_c, cur_r;
+                }
+                if (curCompVis.size() < scaledThresh) {
+                    for (int id : curCompVis) {
+                        const int cr = (id >> 16), cc = (id & lo_mask);
+                        image.at<uint8_t>(cr, cc) = 255;
+                    }
+                }
+            }
+        }
+        {
+            std::atomic<int> row(top_left.y);
+            auto worker = [&] () {
+                int r = 0;
+                while (true) {
+                    r = row++;
+                    if (r > bot_right.y) break;
+                    uint8_t* ptr = image.ptr<uint8_t>(r);
+                    for (int cc = top_left.x; cc <= bot_right.x; ++cc) {
+                        uint8_t& val = ptr[cc];
+                        if (val >= VISITED_OFFSET && val != 255)
+                            val -= VISITED_OFFSET;
+                    }
+                }
+            };
+            std::vector<std::thread> thds;
+            for (int i = 0; i < num_threads; ++i) {
+                thds.emplace_back(worker);
+            }
+            for (int i = 0; i < num_threads; ++i) {
+                thds[i].join();
+            }
+        }
+    }
 }
 
 namespace ark {
@@ -345,7 +423,7 @@ namespace ark {
                          CameraIntrin& intrin,
                          cv::Size& image_size,
                          int num_images,
-                         const int* part_map)
+                         const std::vector<int>& part_map)
             : numImages(num_images), imageSize(image_size),
               avaModel(ava_model), poseSequence(pose_seq), intrin(intrin),
               partMap(part_map) {
@@ -466,7 +544,7 @@ namespace ark {
         AvatarPoseSequence& poseSequence;
         CameraIntrin& intrin;
         std::vector<int> seq;
-        const int* partMap;
+        const std::vector<int>& partMap;
     };
 
     template<class DataSource>
@@ -2968,6 +3046,16 @@ namespace ark {
         }
 
         updateBestMatchTable();
+
+        std::ifstream partmap_ifs(path + ".partmap");
+        if (!partmap_ifs) {
+            std::cout << "Warning: partmap not found, please ensure you downloaded the .partmap file and placed it beside the .srtr; using default map\n";
+        } else {
+            int numNewParts = 0;
+            if (!readPartMap(partmap_ifs, partMap, numNewParts, partMapType)) {
+                std::cout << "Warning: partmap at '" << path << ".partmap' has invalid format or is corrupted; using default map\n";
+            }
+        }
         return true;
     }
 
@@ -3216,7 +3304,7 @@ namespace ark {
                    int min_samples_per_feature,
                    float frac_samples_per_feature,
                    int threshes_per_feature,
-                   const int* part_map,
+                   const std::vector<int>& part_map,
                    int max_images_loaded,
                    int mem_limit_mb,
                    const std::string& train_partial_save_path
@@ -3236,6 +3324,7 @@ namespace ark {
                    max_tree_depth, num_threads,
                    train_partial_save_path, verbose);
         currentTrainer = nullptr;
+        partMap = part_map;
         updateBestMatchTable();
     }
 
@@ -3245,15 +3334,14 @@ namespace ark {
             cv::Size& image_size,
             int num_threads,
             bool verbose,
-            int num_images,
-            const int* part_map
+            int num_images
             ) {
 
         Eigen::Matrix<uint64_t, Eigen::Dynamic, Eigen::Dynamic> newLeafData(numParts, leafData.size());
         newLeafData.setZero();
 
         {
-            AvatarDataSource dataSource(avatar_model, pose_seq, intrin, image_size, num_images, part_map);
+            AvatarDataSource dataSource(avatar_model, pose_seq, intrin, image_size, num_images, partMap);
             std::atomic<size_t> atomicImageCnt(0);
             std::mutex transMutex;
             auto worker = [&]() {
@@ -3346,8 +3434,16 @@ namespace ark {
             com_pre.bottomRows<1>().setZero();
         }
         // if (interval > 1) majorityGrid(image, interval, numParts);
-        suppressPartNonMax(image, interval, numParts, num_threads,
-                top_left, bot_right, com_pre, dist_to_pre_weight);
+        if (partMapType == 0) {
+            // 'Contiguous' part map: take contiguous blob with best score
+            // (size, minus small cost to encourage staying close to previous edstimate)
+            suppressPartNonMax(image, interval, numParts, num_threads,
+                    top_left, bot_right, com_pre, dist_to_pre_weight);
+        } else {
+            // 'Disjoint' part map: same body part may not be in a contiguous blob, can't take max
+            // instead, just remove small pieces of image to reduce noise
+            removeSmallPieces(image, interval, numParts, num_threads, top_left, bot_right);
+        }
         if (interval > 1) upscaleGrid(image, interval, num_threads,
                 top_left, bot_right);
     }
@@ -3363,5 +3459,51 @@ namespace ark {
                 }
             }
         }
+    }
+
+    bool RTree::readPartMap(std::istream& is, std::vector<int>& result, int& num_new_parts, int& partmap_type) {
+        std::string marker;
+        is >> marker;
+        if (marker != "partmap") {
+            return false;
+        }
+        is >> marker;
+        if (marker == "disjoint") {
+            partmap_type = 1;
+        } else if (marker == "contiguous") {
+            partmap_type = 0;
+        } else {
+            return false;
+        }
+
+        int nOldParts, nNewParts;
+        is >> marker;
+        if (marker != "src") {
+            return false;
+        }
+        is >> nOldParts;
+        std::map<std::string, int> oldEnum, newEnum; 
+        for (int i = 0; i < nOldParts; ++i) {
+            std::string name; is >> name;
+            oldEnum[name] = i;
+        }
+        is >> marker;
+        if (marker != "dest") {
+            return false;
+        }
+        is >> nNewParts;
+        for (int i = 0; i < nNewParts; ++i) {
+            std::string name; is >> name;
+            newEnum[name] = i;
+        }
+
+        std::string oldName, newName;
+        result.resize(nOldParts);
+        for (int i = 0; i < nOldParts; ++i) {
+            if (!is) break;
+            is >> oldName >> newName;
+            result[oldEnum[oldName]] = newEnum[newName];
+        }
+        return true;
     }
 }

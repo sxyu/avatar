@@ -41,7 +41,7 @@ namespace ark {
          *  Assumes camera is at 0,0,0 and looking in positive z direction
          *  @param part_map optional array of integers specifying part id to assign for each joint; if not given, uses joint id 
          **/
-        cv::Mat renderPartMask(const cv::Size& image_size, const int* part_map = nullptr) const;
+        cv::Mat renderPartMask(const cv::Size& image_size, const std::vector<int>& part_map = {}) const;
 
         /** Render avatar faces given image size
          *  Faces is a CV_32S image where pixels assigned to each face has colors 0, 1, ...

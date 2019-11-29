@@ -3,14 +3,13 @@
 
 #include "RTree.h"
 #include "Avatar.h"
-#include "Config.h"
 
 namespace {
 constexpr char WIND_NAME[] = "Image";
 }
 
 int main(int argc, char** argv) {
-    std::string input_path, output_path, intrin_path, resume_file;
+    std::string partmap_path, input_path, output_path, intrin_path, resume_file;
     bool verbose, preload;
     int num_threads, num_images;
     float frac_samples_per_feature;
@@ -67,7 +66,6 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    ark::RTree rtree(16);
     ark::AvatarModel model;
     ark::AvatarPoseSequence poseSequence;
     if (poseSequence.numFrames) {
@@ -97,8 +95,9 @@ int main(int argc, char** argv) {
         }
         output_path.append(".refine.srtr");
     }
+    ark::RTree rtree(0);
     rtree.loadFile(input_path);
-    rtree.trainTransfer(model, poseSequence, intrin, size, num_threads, verbose, num_images, ark::part_map::SMPL_JOINT_TO_PART_MAP);
+    rtree.trainTransfer(model, poseSequence, intrin, size, num_threads, verbose, num_images);
     rtree.exportFile(output_path);
 
     return 0;

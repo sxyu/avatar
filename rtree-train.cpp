@@ -1,16 +1,16 @@
 #include <iostream>
+#include <fstream>
 #include <boost/program_options.hpp>
 
 #include "RTree.h"
 #include "Avatar.h"
-#include "Config.h"
 
 namespace {
 constexpr char WIND_NAME[] = "Image";
 }
 
 int main(int argc, char** argv) {
-    std::string data_path, output_path, intrin_path, resume_file;
+    std::string partmap_path, data_path, output_path, intrin_path, resume_file;
     bool verbose, preload;
     int num_threads, num_images, num_points_per_image, num_features, num_features_filtered, max_probe_offset, min_samples, max_tree_depth,
         min_samples_per_feature, threshes_per_feature, cache_size,
@@ -52,6 +52,7 @@ int main(int argc, char** argv) {
     ;
 
     descPositional.add_options()
+        ("partmap", po::value<std::string>(&partmap_path)->required(), "Part map path")
         ("data", po::value<std::string>(&data_path)->default_value("://SMPLSYNTH"), "Data directory path; leave blank to generate simulated data")
         ;
 
@@ -60,6 +61,7 @@ int main(int argc, char** argv) {
     po::variables_map vm;
 
     po::positional_options_description posopt;
+    posopt.add("partmap", 1);
     posopt.add("data", 1);
 
     try {
@@ -90,7 +92,19 @@ int main(int argc, char** argv) {
         std::cerr << "WARNING: min_samples (-m) cannot be less than 1, defaulting to 1...\n";
         min_samples = 1;
     }
-    ark::RTree rtree(ark::part_map::_COUNT);
+
+    std::vector<int> partMap;
+    int numNewParts;
+    {
+        std::ifstream pmifs(partmap_path);
+        int partmapType;
+        if (!pmifs || !ark::RTree::readPartMap(pmifs, partMap, numNewParts, partmapType)) {
+            std::cerr << "ERROR: failed to read partmap at '" << partmap_path << "', exiting\n";
+            return 1;
+        }
+    }
+
+    ark::RTree rtree(numNewParts);
     if (data_path == "://SMPLSYNTH") {
         ark::AvatarModel model;
         ark::AvatarPoseSequence poseSequence;
@@ -116,7 +130,7 @@ int main(int argc, char** argv) {
         }
         rtree.trainFromAvatar(model, poseSequence, intrin, size, num_threads, verbose, num_images, num_points_per_image,
                 num_features, num_features_filtered, max_probe_offset, min_samples, max_tree_depth, min_samples_per_feature, frac_samples_per_feature,
-                threshes_per_feature, ark::part_map::SMPL_JOINT_TO_PART_MAP, cache_size, mem_limit_mb, resume_file);
+                threshes_per_feature, partMap, cache_size, mem_limit_mb, resume_file);
     } else {
         rtree.train(data_path + "/depth_exr", data_path + "/part_mask", num_threads, verbose, num_images, num_points_per_image,
                 num_features, num_features_filtered, max_probe_offset, min_samples, max_tree_depth, min_samples_per_feature, frac_samples_per_feature, threshes_per_feature,

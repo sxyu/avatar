@@ -155,7 +155,7 @@ namespace {
             const std::vector<cv::Point2f>& projected,
             const std::vector<std::vector<std::pair<double, int> > > & assigned_joint,
             const cv::Vec3i& face,
-            const int* part_map) {
+            const std::vector<int>& part_map) {
         std::pair<double, int> xf[3] =
         {
             {projected[face[0]].x, 0},
@@ -175,7 +175,7 @@ namespace {
         auto assigned_a = assigned_joint[face[xf[0].second]][0].second,
              assigned_b = assigned_joint[face[xf[1].second]][0].second,
              assigned_c = assigned_joint[face[xf[2].second]][0].second;
-        if (part_map != nullptr) {
+        if (part_map.size()) {
             assigned_a = part_map[assigned_a];
             assigned_b = part_map[assigned_b];
             assigned_c = part_map[assigned_c];
@@ -743,7 +743,7 @@ namespace ark {
         return renderedDepth;
     }
 
-    cv::Mat AvatarRenderer::renderPartMask(const cv::Size& image_size, const int* part_map) const {
+    cv::Mat AvatarRenderer::renderPartMask(const cv::Size& image_size, const std::vector<int>& part_map) const {
         if (ava.cloud.cols() == 0) {
             std::cerr << "WARNING: Attempt to render empty avatar detected\n";
             return cv::Mat();

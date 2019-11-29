@@ -11,7 +11,7 @@ namespace ark {
     class AvatarOptimizer {
     public:
         /** Construct avatar optimizer for given avatar, with avatar intrinsics and image size */
-        AvatarOptimizer(Avatar& ava, const CameraIntrin& intrin, const cv::Size& image_size, int num_parts, const int* part_map);
+        AvatarOptimizer(Avatar& ava, const CameraIntrin& intrin, const cv::Size& image_size, int num_parts, const std::vector<int>& part_map);
 
         /** Begin full optimization on the target data cloud */
         void optimize(const Eigen::Matrix<double, 3, Eigen::Dynamic>& data_cloud,
@@ -50,7 +50,7 @@ namespace ark {
 
         /** Mapping from assigned joint to body part
          * (as defined for the RTree used, was given during training) */
-        const int * partMap;
+        const std::vector<int>& partMap;
     private:
         /** Internal precomputed values for avatar model body part
          *  sizes/counts which are constant across optimize calls */

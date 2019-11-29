@@ -15,13 +15,16 @@
 #include <boost/thread.hpp>
 
 #include "AvatarRenderer.h"
-#include "Config.h"
+#include "RTree.h"
 #include "Util.h"
 
 namespace {
 using namespace ark;
 
-void run(int num_threads, int num_to_gen, std::string out_path, const cv::Size& image_size, const CameraIntrin& intrin, int starting_number, bool overwrite, bool preload)
+void run(int num_threads, int num_to_gen, std::string out_path,
+        const std::vector<int>& part_map,
+        int num_new_parts,
+        const cv::Size& image_size, const CameraIntrin& intrin, int starting_number, bool overwrite, bool preload)
 {
     // Load first joint assignments
     using boost::filesystem::path;
@@ -117,7 +120,7 @@ void run(int num_threads, int num_to_gen, std::string out_path, const cv::Size& 
             std::cout << "Wrote " << depthImgPath << std::endl;
 
             const std::string partMaskImgPath = (partMaskPath / ("part_mask_" + ss_img_id.str() + ".tiff")).string();
-            cv::imwrite(partMaskImgPath, renderer.renderPartMask(image_size, part_map::SMPL_JOINT_TO_PART_MAP));
+            cv::imwrite(partMaskImgPath, renderer.renderPartMask(image_size, part_map));
             //std::cout << "Wrote " << partMaskImgPath << std::endl;
 
             // Output labels
@@ -176,7 +179,7 @@ void run(int num_threads, int num_to_gen, std::string out_path, const cv::Size& 
 int main(int argc, char** argv) {
     namespace po = boost::program_options;
 
-    std::string outPath, intrinPath;
+    std::string partmapPath, outPath, intrinPath;
     int startingNumber, numToGen, numThreads;
     bool overwrite, preload;
     cv::Size size;
@@ -189,6 +192,7 @@ int main(int argc, char** argv) {
         ("overwrite,o", po::bool_switch(&overwrite), "If specified, overwrites existing files. Else, skips over them.")
         ("preload,p", po::bool_switch(&preload), "If specified, pre-loads mocap sequence (if available); WARNING: may take > 5 GB of memory.")
         (",j", po::value<int>(&numThreads)->default_value(boost::thread::hardware_concurrency()), "Number of threads")
+        ("partmap,P", po::value<std::string>(&partmapPath)->default_value(""), "Part map path")
     ;
 
     descPositional.add_options()
@@ -205,6 +209,7 @@ int main(int argc, char** argv) {
 
     po::positional_options_description posopt;
     posopt.add("output_path", 1);
+    posopt.add("partmap", 1);
     posopt.add("num_to_gen", 1);
     posopt.add("starting_number", 1);
     posopt.add("intrin_path", 1);
@@ -244,7 +249,22 @@ int main(int argc, char** argv) {
         intrin.cy = 366.992;
     }
 
-    run(numThreads, numToGen, outPath, size, intrin,
+    std::vector<int> partMap;
+    int numNewParts;
+    {
+        if (partmapPath.empty()) {
+            std::cerr << "WARNING: partmap file not specified, using default map\n";
+        } else {
+            std::ifstream pmifs(partmapPath);
+            int partmapType;
+            if (!pmifs || !ark::RTree::readPartMap(pmifs, partMap, numNewParts, partmapType)) {
+                std::cerr << "WARNING: failed to read partmap at '" << partmapPath << "', using default map\n";
+                partMap.clear();
+            }
+        }
+    }
+
+    run(numThreads, numToGen, outPath, partMap, numNewParts, size, intrin,
            startingNumber, overwrite, preload);
     return 0;
 }

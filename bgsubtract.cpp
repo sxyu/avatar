@@ -15,7 +15,6 @@
 #include "AvatarRenderer.h"
 #include "BGSubtractor.h"
 #include "Calibration.h"
-#include "Config.h"
 #include "RTree.h"
 #include "Util.h"
 #define BEGIN_PROFILE auto start = std::chrono::high_resolution_clock::now()
@@ -38,7 +37,6 @@ int main(int argc, char** argv) {
         ("background,b", po::value<int>(&bgId)->default_value(9999), "Background image id")
         ("image,i", po::value<int>(&imId)->default_value(1), "Current image id")
         ("pad,p", po::value<int>(&padSize)->default_value(4), "Zero pad width for image names in this dataset")
-        ("rtree,r", po::value<std::string>(&rtreePath)->default_value(""), "RTree model path")
         ("rtree-only,R", po::bool_switch(&rtreeOnly), "Show RTree part segmentation only and skip optimization")
         ("no-occlusion", po::bool_switch(&disableOcclusion), "Disable occlusion detection in avatar optimizer prior to NN matching")
         ("betapose", po::value<float>(&betaPose)->default_value(0.05), "Optimization loss function: pose prior term weight")
@@ -52,6 +50,7 @@ int main(int argc, char** argv) {
     ;
     descPositional.add_options()
         ("dataset_path", po::value<std::string>(&datasetPath)->required(), "Input dataset root directory, should contain depth_exr etc")
+        ("rtree", po::value<std::string>(&rtreePath), "RTree model path")
     ;
     descCombined.add(descPositional);
     descCombined.add(desc);
@@ -59,6 +58,7 @@ int main(int argc, char** argv) {
 
     po::positional_options_description posopt;
     posopt.add("dataset_path", 1);
+    posopt.add("rtree", 1);
     try {
         po::store(po::command_line_parser(argc, argv).options(descCombined)
                 .positional(posopt).run(),
@@ -102,10 +102,11 @@ int main(int argc, char** argv) {
         return 1;
     }
 
+    ark::RTree rtree(rtreePath);
+
     ark::AvatarModel avaModel;
     ark::Avatar ava(avaModel);
-    ark::AvatarOptimizer avaOpt(ava, intrin, background.size(), 16,
-                            ark::part_map::SMPL_JOINT_TO_PART_MAP);
+    ark::AvatarOptimizer avaOpt(ava, intrin, background.size(), rtree.numParts, rtree.partMap);
     avaOpt.betaPose = betaPose; 
     avaOpt.betaShape = betaShape;
     avaOpt.nnStep = nnStep;
@@ -114,9 +115,6 @@ int main(int argc, char** argv) {
     ark::BGSubtractor bgsub(background);
     bgsub.numThreads = std::thread::hardware_concurrency();
     std::vector<std::array<int, 2> > compsBySize;
-
-    ark::RTree rtree(0);
-    if (rtreePath.size()) rtree.loadFile(rtreePath);
 
     // Previous centers of mass: required by RTree postprocessor
     Eigen::Matrix<double, 2, Eigen::Dynamic> comPre;
@@ -188,6 +186,11 @@ int main(int argc, char** argv) {
                         auto* partptr = result.ptr<uint8_t>(r);
                         for (int c = bgsub.topLeft.x; c <= bgsub.botRight.x; c += interval) {
                             if (partptr[c] == 255) continue;
+                            if (partptr[c] >= rtree.numParts) {
+                                std::cerr << "FATAL: RTree body part prediction " << (int)partptr[c] << " is invalid, since there are only "
+                                    << rtree.numParts << " body parts\n";
+                                std::exit(1);
+                            }
                             dataCloud(0, i) = ptr[c][0];
                             dataCloud(1, i) = -ptr[c][1];
                             dataCloud(2, i) = ptr[c][2];

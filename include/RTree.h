@@ -125,7 +125,7 @@ namespace ark {
                    int min_samples_per_feature = 20,
                    float frac_samples_per_feature = 0.01f,
                    int threshes_per_feature = 15,
-                   const int* part_map = nullptr, // part map
+                   const std::vector<int>& part_map = {}, // part map
                    int max_images_loaded = 50,
                    int mem_limit_mb = 12000,
                    const std::string& train_partial_save_path = ""
@@ -139,8 +139,7 @@ namespace ark {
                    cv::Size& image_size,
                    int num_threads = std::thread::hardware_concurrency(),
                    bool verbose = false,
-                   int num_images = 10000,
-                   const int* part_map = nullptr // part map
+                   int num_images = 10000
                    );
 
         /** Utility function for post-processing an output body part labels image
@@ -164,10 +163,17 @@ namespace ark {
                 cv::Point bot_right = cv::Point(-1, -1),
                 double dist_to_pre_weight = 0.001) const;
 
+        /** Utility for reading a partmap file from an input stream */
+        static bool readPartMap(std::istream& is, std::vector<int>& result, int& num_new_parts, int& partmap_type);
+
         std::vector<RNode, Eigen::aligned_allocator<RNode> > nodes;
         std::vector<Distribution> leafData;
         std::vector<uint8_t> leafBestMatch;
+
         int numParts;
+
+        std::vector<int> partMap;
+        int partMapType = -1;
 
     private:
         Distribution predictRecursive(int nodeid, const cv::Mat& depth, const Vec2i& pix);

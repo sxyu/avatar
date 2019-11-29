@@ -156,7 +156,6 @@ set(
   ${INCLUDE_DIR}/AvatarOptimizer.h
   ${INCLUDE_DIR}/BGSubtractor.h
   ${INCLUDE_DIR}/Calibration.h
-  ${INCLUDE_DIR}/Config.h
   ${INCLUDE_DIR}/DepthCamera.h
   ${INCLUDE_DIR}/GaussianMixture.h
   ${INCLUDE_DIR}/RTree.h
