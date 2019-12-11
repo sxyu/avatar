@@ -4,132 +4,132 @@
 #include <Eigen/Dense>
 #include <opencv2/core.hpp>
 #include <opencv2/highgui.hpp>
-#include <pcl/visualization/pcl_visualizer.h>
+// #include <pcl/visualization/pcl_visualizer.h>
 
 #include "Avatar.h"
-#include "AvatarPCL.h"
+// #include "AvatarPCL.h"
 #include "AvatarRenderer.h"
 #include "SparseImage.h"
-#include "ViconSkeleton.h"
-#include "RTree.h"
-#include "Util.h"
+// #include "ViconSkeleton.h"
+// #include "RTree.h"
+// #include "Util.h"
 #define BEGIN_PROFILE auto start = std::chrono::high_resolution_clock::now()
 #define PROFILE(x) do{printf("%s: %f ms\n", #x, std::chrono::duration<double, std::milli>(std::chrono::high_resolution_clock::now() - start).count()); start = std::chrono::high_resolution_clock::now(); }while(false)
 
 constexpr char WIND_NAME[] = "Result";
 
 // open a gui for interacting with avatar
-static void __avatarGUI()
-{
-    using namespace ark;
-    // build file names and paths
-    AvatarModel model;
-    Avatar ava(model);
-
-    const size_t NKEYS = model.numShapeKeys();
-
-    cv::namedWindow("Body Shape");
-    cv::namedWindow("Body Pose");
-    std::vector<int> pcw(NKEYS, 1000), p_pcw(NKEYS, 0);
-
-    // define some axes
-    const Eigen::Vector3d AXISX(1, 0, 0), AXISY(0, 1, 0), AXISZ(0, 0, 1);
-
-    // Body pose control definitions (currently this control system only supports rotation along one axis per body part)
-    const std::vector<std::string> CTRL_NAMES       = {"L HIP",      "R HIP",      "L KNEE",      "R KNEE",      "L ANKLE",      "R ANKLE",      "L ELBLW",        "R ELBOW",        "L WRIST",      "R WRIST",      "HEAD",      "SPINE2",     "ROOT"};
-    const std::vector<int> CTRL_JNT               = {SmplJoint::L_HIP, SmplJoint::R_HIP, SmplJoint::L_KNEE, SmplJoint::R_KNEE, SmplJoint::L_ANKLE, SmplJoint::R_ANKLE, SmplJoint::L_ELBOW, SmplJoint::R_ELBOW, SmplJoint::L_WRIST, SmplJoint::R_WRIST, SmplJoint::HEAD, SmplJoint::SPINE2, SmplJoint::ROOT_PELVIS};
-    const std::vector<Eigen::Vector3d> CTRL_AXIS    = {AXISX,        AXISX,        AXISX,         AXISX,         AXISX,          AXISX,          AXISY,          AXISY,          AXISY,          AXISY,          AXISX,       AXISX,         AXISY};
-    const int N_CTRL = (int)CTRL_NAMES.size();
-
-    std::vector<int> ctrlw(N_CTRL, 1000), p_ctrlw(N_CTRL, 0);
-
-    // Body shapekeys are defined in SMPL model files.
-    int pifx = 0, pify = 0, picx = 0, picy = 0, pframeID = -1;
-    cv::resizeWindow("Body Shape", cv::Size(400, 700));
-    cv::resizeWindow("Body Pose", cv::Size(400, 700));
-    cv::resizeWindow("Body Scale", cv::Size(400, 700));
-    for (int i = 0; i < N_CTRL; ++i) {
-        cv::createTrackbar(CTRL_NAMES[i], "Body Pose", &ctrlw[i], 2000);
-    }
-    for (int i = 0; i < (int)pcw.size(); ++i) {
-        cv::createTrackbar("PC" + std::to_string(i), "Body Shape", &pcw[i], 2000);
-    }
-
-    auto viewer = pcl::visualization::PCLVisualizer::Ptr(new pcl::visualization::PCLVisualizer("3D Viewport"));
-
-    viewer->initCameraParameters();
-    int vp1 = 0;
-    viewer->setWindowName("3D View");
-    viewer->setBackgroundColor(0, 0, 0);
-    // viewer->setCameraClipDistances(0.0, 1000.0);
-
-    volatile bool interrupt = false;
-    viewer->registerKeyboardCallback([&interrupt](const pcl::visualization::KeyboardEvent & evt) {
-        unsigned char k = evt.getKeyCode();
-        if (k == 'Q' || k == 'q' || k == 27) {
-            interrupt = true;
-        }
-    });
-
-    while (!interrupt) {
-        bool controlsChanged = false;
-        for (int i = 0; i < N_CTRL; ++i) {
-            if (ctrlw[i] != p_ctrlw[i]) {
-                controlsChanged = true;
-                break;
-            }
-        }
-        for (int i = 0; i < (int)pcw.size(); ++i) {
-            if (pcw[i] != p_pcw[i]) {
-                controlsChanged = true;
-                break;
-            }
-        }
-        if (controlsChanged) {
-            ava.update();
-
-            viewer->removePointCloud("vp1_cloudHM");
-            viewer->addPointCloud<pcl::PointXYZ>(avatar_pcl::getCloud(ava), "vp1_cloudHM", vp1);
-            viewer->removePolygonMesh("meshHM");
-
-            auto mesh = ark::avatar_pcl::getMesh(ava);
-            viewer->addPolygonMesh(*mesh, "meshHM", vp1);
-            //ava.visualize(viewer, "vp1_", vp1);
-
-            for (int i = 0; i < N_CTRL; ++i) {
-                double angle = (ctrlw[i] - 1000) / 1000.0 * M_PI;
-                if (CTRL_JNT[i] >= ava.model.numJoints()) continue;
-                if (angle == 0) ava.r[CTRL_JNT[i]].setIdentity();
-                else ava.r[CTRL_JNT[i]] = Eigen::AngleAxisd(angle, CTRL_AXIS[i]).toRotationMatrix();
-            }
-
-            for (int i = 0; i < (int)pcw.size(); ++i) {
-                ava.w[i] = (float)(pcw[i] - 1000) / 500.0;
-            }
-
-            ava.p = Eigen::Vector3d(0, 0, 0);
-            ava.update();
-
-            for (int k = 0; k < (int) pcw.size(); ++k) {
-                p_pcw[k] = pcw[k] = (int) (ava.w[k] * 500.0 + 1000);
-                cv::setTrackbarPos("PC" + std::to_string(k), "Body Shape", pcw[k]);
-            }
-
-            double prior = ava.model.posePrior.residual(ava.smplParams()).squaredNorm();
-            // show pose prior value
-            if (!viewer->updateText("-log likelihood: " + std::to_string(prior), 10, 20, 15, 1.0, 1.0, 1.0, "poseprior_disp")) {
-                viewer->addText("-log likelihood: " + std::to_string(prior), 10, 20, 15, 1.0, 1.0, 1.0, "poseprior_disp");
-            }
-
-        }
-        for (int i = 0; i < N_CTRL; ++i) p_ctrlw[i] = ctrlw[i];
-        for (int i = 0; i < (int)pcw.size(); ++i) p_pcw[i] = pcw[i];
-
-        int k = cv::waitKey(1);
-        viewer->spinOnce();
-        if (k == 'q' || k == 27) break;
-    }
-}
+// static void __avatarGUI()
+// {
+//     using namespace ark;
+//     // build file names and paths
+//     AvatarModel model;
+//     Avatar ava(model);
+//
+//     const size_t NKEYS = model.numShapeKeys();
+//
+//     cv::namedWindow("Body Shape");
+//     cv::namedWindow("Body Pose");
+//     std::vector<int> pcw(NKEYS, 1000), p_pcw(NKEYS, 0);
+//
+//     // define some axes
+//     const Eigen::Vector3d AXISX(1, 0, 0), AXISY(0, 1, 0), AXISZ(0, 0, 1);
+//
+//     // Body pose control definitions (currently this control system only supports rotation along one axis per body part)
+//     const std::vector<std::string> CTRL_NAMES       = {"L HIP",      "R HIP",      "L KNEE",      "R KNEE",      "L ANKLE",      "R ANKLE",      "L ELBLW",        "R ELBOW",        "L WRIST",      "R WRIST",      "HEAD",      "SPINE2",     "ROOT"};
+//     const std::vector<int> CTRL_JNT               = {SmplJoint::L_HIP, SmplJoint::R_HIP, SmplJoint::L_KNEE, SmplJoint::R_KNEE, SmplJoint::L_ANKLE, SmplJoint::R_ANKLE, SmplJoint::L_ELBOW, SmplJoint::R_ELBOW, SmplJoint::L_WRIST, SmplJoint::R_WRIST, SmplJoint::HEAD, SmplJoint::SPINE2, SmplJoint::ROOT_PELVIS};
+//     const std::vector<Eigen::Vector3d> CTRL_AXIS    = {AXISX,        AXISX,        AXISX,         AXISX,         AXISX,          AXISX,          AXISY,          AXISY,          AXISY,          AXISY,          AXISX,       AXISX,         AXISY};
+//     const int N_CTRL = (int)CTRL_NAMES.size();
+//
+//     std::vector<int> ctrlw(N_CTRL, 1000), p_ctrlw(N_CTRL, 0);
+//
+//     // Body shapekeys are defined in SMPL model files.
+//     int pifx = 0, pify = 0, picx = 0, picy = 0, pframeID = -1;
+//     cv::resizeWindow("Body Shape", cv::Size(400, 700));
+//     cv::resizeWindow("Body Pose", cv::Size(400, 700));
+//     cv::resizeWindow("Body Scale", cv::Size(400, 700));
+//     for (int i = 0; i < N_CTRL; ++i) {
+//         cv::createTrackbar(CTRL_NAMES[i], "Body Pose", &ctrlw[i], 2000);
+//     }
+//     for (int i = 0; i < (int)pcw.size(); ++i) {
+//         cv::createTrackbar("PC" + std::to_string(i), "Body Shape", &pcw[i], 2000);
+//     }
+//
+//     auto viewer = pcl::visualization::PCLVisualizer::Ptr(new pcl::visualization::PCLVisualizer("3D Viewport"));
+//
+//     viewer->initCameraParameters();
+//     int vp1 = 0;
+//     viewer->setWindowName("3D View");
+//     viewer->setBackgroundColor(0, 0, 0);
+//     // viewer->setCameraClipDistances(0.0, 1000.0);
+//
+//     volatile bool interrupt = false;
+//     viewer->registerKeyboardCallback([&interrupt](const pcl::visualization::KeyboardEvent & evt) {
+//         unsigned char k = evt.getKeyCode();
+//         if (k == 'Q' || k == 'q' || k == 27) {
+//             interrupt = true;
+//         }
+//     });
+//
+//     while (!interrupt) {
+//         bool controlsChanged = false;
+//         for (int i = 0; i < N_CTRL; ++i) {
+//             if (ctrlw[i] != p_ctrlw[i]) {
+//                 controlsChanged = true;
+//                 break;
+//             }
+//         }
+//         for (int i = 0; i < (int)pcw.size(); ++i) {
+//             if (pcw[i] != p_pcw[i]) {
+//                 controlsChanged = true;
+//                 break;
+//             }
+//         }
+//         if (controlsChanged) {
+//             ava.update();
+//
+//             viewer->removePointCloud("vp1_cloudHM");
+//             viewer->addPointCloud<pcl::PointXYZ>(avatar_pcl::getCloud(ava), "vp1_cloudHM", vp1);
+//             viewer->removePolygonMesh("meshHM");
+//
+//             auto mesh = ark::avatar_pcl::getMesh(ava);
+//             viewer->addPolygonMesh(*mesh, "meshHM", vp1);
+//             //ava.visualize(viewer, "vp1_", vp1);
+//
+//             for (int i = 0; i < N_CTRL; ++i) {
+//                 double angle = (ctrlw[i] - 1000) / 1000.0 * M_PI;
+//                 if (CTRL_JNT[i] >= ava.model.numJoints()) continue;
+//                 if (angle == 0) ava.r[CTRL_JNT[i]].setIdentity();
+//                 else ava.r[CTRL_JNT[i]] = Eigen::AngleAxisd(angle, CTRL_AXIS[i]).toRotationMatrix();
+//             }
+//
+//             for (int i = 0; i < (int)pcw.size(); ++i) {
+//                 ava.w[i] = (float)(pcw[i] - 1000) / 500.0;
+//             }
+//
+//             ava.p = Eigen::Vector3d(0, 0, 0);
+//             ava.update();
+//
+//             for (int k = 0; k < (int) pcw.size(); ++k) {
+//                 p_pcw[k] = pcw[k] = (int) (ava.w[k] * 500.0 + 1000);
+//                 cv::setTrackbarPos("PC" + std::to_string(k), "Body Shape", pcw[k]);
+//             }
+//
+//             double prior = ava.model.posePrior.residual(ava.smplParams()).squaredNorm();
+//             // show pose prior value
+//             if (!viewer->updateText("-log likelihood: " + std::to_string(prior), 10, 20, 15, 1.0, 1.0, 1.0, "poseprior_disp")) {
+//                 viewer->addText("-log likelihood: " + std::to_string(prior), 10, 20, 15, 1.0, 1.0, 1.0, "poseprior_disp");
+//             }
+//
+//         }
+//         for (int i = 0; i < N_CTRL; ++i) p_ctrlw[i] = ctrlw[i];
+//         for (int i = 0; i < (int)pcw.size(); ++i) p_pcw[i] = pcw[i];
+//
+//         int k = cv::waitKey(1);
+//         viewer->spinOnce();
+//         if (k == 'q' || k == 27) break;
+//     }
+// }
 
 // void avatarViconAlign()
 // {
@@ -303,17 +303,24 @@ static void __avatarGUI()
 
 int main(int argc, char** argv) {
     // __avatarGUI();
-    ark::RTree rtree(16);
-    rtree.loadFile("/mnt_d/Programming/5Explore/smplsynth/build/rtree-results/tree.150k.refine.srtr");
-    cv::Mat m;
-    volatile int sum = 0;
-    m = cv::imread("/mnt_d/Programming/5Explore/smplsynth/build/ds/depth_exr/depth_00000000.exr");
-    BEGIN_PROFILE;
-    for (int i = 0; i < 2000; ++i) {
-        cv::Mat result = rtree.predictBest(m, 4);
-        sum += cv::countNonZero(result);
-    }
-    PROFILE(Total);
-    cout << sum << "\n";
+    // ark::RTree rtree(16);
+    ark::AvatarModel model;
+    ark::Avatar ava(model);
+    ark::CameraIntrin intrin;
+    cv::Size size(1280, 720);
+    intrin.clear();
+    intrin.fx = 606.438;
+    intrin.fy = 606.351;
+    intrin.cx = 637.294;
+    intrin.cy = 366.992;
+    ava.randomize();
+    ava.p.z() = 2.5;
+    ava.update();
+    ark::AvatarRenderer renderer(ava, intrin);
+    cv::Mat m = renderer.renderLambert(size);
+    cv::imshow("Result", m);
+    cv::waitKey(0);
+
     return 0;
 }
+

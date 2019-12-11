@@ -216,7 +216,7 @@ namespace ark {
                     Eigen::Map<Eigen::VectorXd> shapedCloudVec(shapedCloud.data(), 3 * shapedCloud.cols());
 
                     /** Apply shape keys */
-                    shapedCloudVec.noalias() = ava.model.keyClouds * ava.w + ava.model.baseCloud; 
+                    shapedCloudVec.noalias() = ava.model.keyClouds * ava.w + ava.model.baseCloud;
 
                     /** Apply joint [shape] regressor */
                     // TODO: use dense joint regressor with compressed cloud
@@ -338,9 +338,9 @@ namespace ark {
                     }
 
                     /** Joint ID */
-                    int jid; 
+                    int jid;
 
-                    /** Assigned joints of the skin point corresponding to the joint */ 
+                    /** Assigned joints of the skin point corresponding to the joint */
                     int assign[MAX_ASSIGN];
 
                     /** Assignment weight */
@@ -485,7 +485,7 @@ namespace ark {
                         // Quaternion-vector rotation (pseudo-)Jacobian
                         double w = q.w() * 2;
                         dRot.setZero();
-                        dRot << 
+                        dRot <<
                             u(1)*v(1) + v(2)*u(2)    ,
                             w*v(2)    + u(0)*v(1)   - 2*u(1)*v(0),
                             -w*v(1)    - 2*v(0)*u(2) + u(0)*v(2),
@@ -608,7 +608,7 @@ icpJacobian[i].setZero();
                             J.bottomLeftCorner<1, 3>().setZero();
                         }
                     }
-                }                
+                }
                 return true;
             }
             AvatarEvaluationCommonData<AvatarCostFunctorCache>& commonData;
@@ -679,7 +679,7 @@ icpJacobian[i].setZero();
 
                         if (commonData.shapeEnabled) {
                             Eigen::Map<const Eigen::Matrix<T, Eigen::Dynamic, 1> > wMap(params[commonData.ava.model.numJoints() + 1], commonData.ava.model.numShapeKeys(), 1);
-                            jointPosVec.noalias() = commonData.ava.model.jointShapeRegBase.cast<T>() + commonData.ava.model.jointShapeReg.cast<T>() * wMap; 
+                            jointPosVec.noalias() = commonData.ava.model.jointShapeRegBase.cast<T>() + commonData.ava.model.jointShapeReg.cast<T>() * wMap;
                         } else {
                             jointPosVec.noalias() = commonData.ava.model.jointShapeRegBase.cast<T>() + commonData.ava.model.jointShapeReg.cast<T>() * commonData.ava.w.cast<T>();
                         }
@@ -851,7 +851,7 @@ icpJacobian[i].setZero();
                 //std::cerr << correspondences[i].size() << "SZ\n";
                 for (int j = 0; j < MAX_CORRES_PER_POINT; ++j) {
                 int r = random_util::randint<int>(j, correspondences[i].size()-1);
-                std::swap(correspondences[i][j], correspondences[i][r]); 
+                std::swap(correspondences[i][j], correspondences[i][r]);
                 }
                 correspondences[i].resize(MAX_CORRES_PER_POINT);
                 }
@@ -1017,7 +1017,7 @@ fullParams.push_back(common.ava.p.data());
             }
             jaco[params.size()-1] = new double[3*opt.ava.model.numShapeKeys()];
             common.PrepareForEvaluation(true, true);
-            our_cost_function->Evaluate(&params[0], resid, jaco); 
+            our_cost_function->Evaluate(&params[0], resid, jaco);
             std::cerr << "Residual ours \n" << resid[0] << " " << resid[1] << " " << resid[2] << "\n";
 
             double** jaco2 = new double*[fullParams.size()];
@@ -1026,7 +1026,7 @@ fullParams.push_back(common.ava.p.data());
                 jaco2[i] = new double[3*4];
             }
             jaco2[fullParams.size()-1] = new double[3*opt.ava.model.numShapeKeys()];
-            cost_function->Evaluate(&fullParams[0], resid, jaco2); 
+            cost_function->Evaluate(&fullParams[0], resid, jaco2);
             std::cerr << "Residual theirs \n" << resid[0] << " " << resid[1] << " " << resid[2] << "\n";
 
             std::cerr << "JACOBIAN ours \n";
@@ -1226,7 +1226,7 @@ fullParams.push_back(common.ava.p.data());
                     // pointVisible[faces[ptr[c]].second[0]]
                     //     = pointVisible[faces[ptr[c]].second[1]]
                 }
-                                
+
                 /*
                 // True occlusion (e.g. hand occluding the body)
                 // too slow, not useful probably
@@ -1256,7 +1256,7 @@ fullParams.push_back(common.ava.p.data());
                     num_threads,
                     /*invert*/ true); // 3.3 ms
             PROFILE(>> NN Corresponences);
-            
+
             using namespace ceres;
             Problem problem;
 

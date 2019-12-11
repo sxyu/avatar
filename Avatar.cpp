@@ -24,7 +24,7 @@ namespace {
             std::string label;
             pcd >> label;
             if (label == "DATA") {
-                if (nPoints < 0) { 
+                if (nPoints < 0) {
                     std::cerr << "ERROR: invalid PCD file at " << path << ": no WIDTH field before data, so "
                                  "we don't know how many points there are!\n";
                     std::exit(0);
@@ -64,16 +64,15 @@ namespace {
     }
 
     /** Paint projected triangle on depth map using barycentric linear interp */
-    inline void paintDepthTriangleBary(
-            cv::Mat& output_depth,
+    template<class T>
+    inline void paintTriangleBary(
+            cv::Mat& output,
             const cv::Size& image_size,
             const std::vector<cv::Point2f>& projected,
-            const ark::CloudType& model_points,
-            // int face_id,
-            // const ark::MeshType& mesh,
-            const cv::Vec3i& face
+            const cv::Vec3i& face,
+            const float* zvec,
+            float maxz = 255.0f
             ) {
-        // const auto face = mesh.col(face_id);
         std::pair<double, int> yf[3] =
         {
             {projected[face(0)].y, 0},
@@ -89,13 +88,11 @@ namespace {
         a.y = std::floor(a.y);
         c.y = std::ceil(c.y);
         if (a.y == c.y) return;
-        const auto az = model_points(2, face(yf[0].second)),
-              bz = model_points(2, face(yf[1].second)),
-              cz = model_points(2, face(yf[2].second));
 
         int minyi = std::max<int>(a.y, 0),
             maxyi = std::min<int>(c.y, image_size.height-1),
             midyi = std::floor(b.y);
+        float az = zvec[yf[0].second], bz = zvec[yf[1].second], cz = zvec[yf[2].second];
 
         float denom = 1.0f / ((b.x - c.x) * (a.y - c.y) + (c.y - b.y) * (a.x - c.x));
         if (a.y != b.y) {
@@ -114,11 +111,13 @@ namespace {
 
                 float w1v = (b.x - c.x) * (i - c.y);
                 float w2v = (c.x - a.x) * (i - c.y);
-                auto* ptr = output_depth.ptr<float>(i);
+                T* ptr = output.ptr<T>(i);
                 for (int j = minxi; j <= maxxi; ++j) {
                     float w1 = (w1v + (c.y - b.y) * (j - c.x)) * denom;
                     float w2 = (w2v + (a.y - c.y) * (j - c.x)) * denom;
-                    ptr[j] = w1 * az + w2 * bz + (1.f - w1 - w2) * cz;
+                    ptr[j] = T(std::min(
+                                std::max(w1 * az + w2 * bz + (1.f - w1 - w2) * cz,
+                                    0.0f), maxz));
                 }
             }
         }
@@ -138,11 +137,13 @@ namespace {
 
                 float w1v = (b.x - c.x) * (i - c.y);
                 float w2v = (c.x - a.x) * (i - c.y);
-                auto* ptr = output_depth.ptr<float>(i);
+                T* ptr = output.ptr<T>(i);
                 for (int j = minxi; j <= maxxi; ++j) {
                     float w1 = (w1v + (c.y - b.y) * (j - c.x)) * denom;
                     float w2 = (w2v + (a.y - c.y) * (j - c.x)) * denom;
-                    ptr[j] = w1 * az + w2 * bz + (1.f - w1 - w2) * cz;
+                    ptr[j] = T(std::min(
+                                std::max(w1 * az + w2 * bz + (1.f - w1 - w2) * cz,
+                                    0.0f), maxz));
                 }
             }
         }
@@ -180,11 +181,6 @@ namespace {
             assigned_b = part_map[assigned_b];
             assigned_c = part_map[assigned_c];
         }
-        /*
-           const auto az = model_points[face[xf[0].second]].z,
-           bz = model_points[face[xf[1].second]].z,
-           cz = model_points[face[xf[2].second]].z;
-           */
 
         int minxi = std::max<int>(a.x, 0),
             maxxi = std::min<int>(c.x, image_size.width-1),
@@ -252,7 +248,7 @@ namespace {
         }
     }
 
-    /** Paint projected triangle on int image (CV_32I) by to single color */
+    /** Paint projected triangle on image to single color (based on template type) */
     template<class T>
     inline void paintTriangleSingleColor(
             cv::Mat& output_image,
@@ -500,7 +496,7 @@ namespace ark {
     void Avatar::update() {
 
         /** Apply shape keys */
-        shapedCloudVec.noalias() = model.keyClouds * w + model.baseCloud; 
+        shapedCloudVec.noalias() = model.keyClouds * w + model.baseCloud;
         Eigen::Map<CloudType> shapedCloud(shapedCloudVec.data(), 3, model.numPoints());
 
         /** Apply joint [shape] regressor */
@@ -598,10 +594,6 @@ namespace ark {
         }
     }
 
-    void randomMocapPose() {
-        random_util::randint(0, 100);
-    }
-
     Eigen::VectorXd Avatar::smplParams() const {
         Eigen::VectorXd res;
         res.resize((model.numJoints() - 1) * 3);
@@ -672,7 +664,7 @@ namespace ark {
                 projectedPoints[i].x = static_cast<double>(pt(0))
                     * intrin.fx / pt(2) + intrin.cx;
                 projectedPoints[i].y = -static_cast<double>(pt(1)) * intrin.fy / pt(2) + intrin.cy;
-            } 
+            }
         }
         return projectedPoints;
     }
@@ -685,7 +677,7 @@ namespace ark {
                 projectedJoints[i].x = static_cast<double>(pt(0))
                     * intrin.fx / pt(2) + intrin.cx;
                 projectedJoints[i].y = -static_cast<double>(pt(1)) * intrin.fy / pt(2) + intrin.cy;
-            } 
+            }
         }
         return projectedJoints;
     }
@@ -727,6 +719,7 @@ namespace ark {
         const auto& faces = getOrderedFaces();
 
         cv::Mat renderedDepth = cv::Mat::zeros(image_size, CV_32F);
+        float zv[3];
         for (int i = 0; i < ava.model.numFaces();++i) {
             auto& a = ava.cloud.col(faces[i].second[0]);
             auto& b = ava.cloud.col(faces[i].second[1]);
@@ -737,10 +730,88 @@ namespace ark {
                 paintTriangleSingleColor(renderedDepth, image_size, projected, faces[i].second, 0);
             }
             else {
-                paintDepthTriangleBary(renderedDepth, image_size, projected, ava.cloud, faces[i].second);
+                zv[0] = (float)a.z(); zv[1] = (float)b.z(); zv[2] = (float)c.z();
+                paintTriangleBary<float>(
+                   renderedDepth, image_size, projected, faces[i].second, zv);
             }
         }
         return renderedDepth;
+    }
+
+    cv::Mat AvatarRenderer::renderLambert(const cv::Size& image_size) const {
+        if (ava.cloud.cols() == 0) {
+            std::cerr << "WARNING: Attempt to render empty avatar detected, please call update() first\n";
+            return cv::Mat();
+        }
+        const auto& projected = getProjectedPoints();
+        const auto& faces = getOrderedFaces();
+
+        cv::Mat renderedGray = cv::Mat::zeros(image_size, CV_8U);
+        const Eigen::Vector3d mainLight(0.8, 1.5, -1.2);
+        const double mainLightIntensity = 0.8;
+        const Eigen::Vector3d backLight(-0.2, 3.5, 0.4);
+        const double backLightIntensity = 0.2;
+        float lambert[3];
+
+        Eigen::VectorXi faceCnt(ava.model.numPoints());
+        faceCnt.setZero();
+        std::vector<bool> visible(ava.model.numFaces());
+        Eigen::Matrix<double, 3, Eigen::Dynamic> vertNormal(3, ava.model.numPoints());
+        vertNormal.setZero();
+        for (int i = 0; i < ava.model.numFaces();++i) {
+            auto& a = ava.cloud.col(faces[i].second[0]);
+            auto& b = ava.cloud.col(faces[i].second[1]);
+            auto& c = ava.cloud.col(faces[i].second[2]);
+            Eigen::Vector3d normal = (b-a).cross(c-a).normalized();
+            visible[i] = normal.z() < -1e-8;
+            if (!visible[i]) continue;
+            for (int j = 0; j < 3; ++j) {
+                ++faceCnt[faces[i].second[j]];
+                vertNormal.col(faces[i].second[j]) += normal;
+            }
+        }
+        for (int i = 0; i < ava.model.numPoints();++i) {
+            if (faceCnt[i] == 0) continue;
+            vertNormal.col(i) /= faceCnt[i];
+        }
+
+        for (int i = 0; i < ava.model.numFaces();++i) {
+            if (!visible[i]) continue;
+            int ai = faces[i].second[0],
+                bi = faces[i].second[1],
+                ci = faces[i].second[2];
+            auto a = ava.cloud.col(ai),
+                 b = ava.cloud.col(bi),
+                 c = ava.cloud.col(ci);
+            auto na = vertNormal.col(ai),
+                 nb = vertNormal.col(bi),
+                 nc = vertNormal.col(ci);
+            if (na.z() < 0.0 && nb.z() < 0.0 && nc.z() < 0.0) { // Visible face
+                // Eigen::Vector3d cen = (a+b+c) / 3.0;
+                Eigen::Vector3d mainLightVec_a = (mainLight - a).normalized();
+                Eigen::Vector3d backLightVec_a = (backLight - a).normalized();
+                lambert[0] = float(mainLightVec_a.dot(na) * mainLightIntensity
+                                 + backLightVec_a.dot(na) * backLightIntensity)
+                             * 255;
+                if (lambert[0] <= 0.0) continue;
+                Eigen::Vector3d mainLightVec_b = (mainLight - b).normalized();
+                Eigen::Vector3d backLightVec_b = (backLight - b).normalized();
+                lambert[1] = float(mainLightVec_b.dot(nb) * mainLightIntensity
+                                 + backLightVec_b.dot(nb) * backLightIntensity)
+                             * 255;
+                if (lambert[1] <= 0.0) continue;
+                Eigen::Vector3d mainLightVec_c = (mainLight - c).normalized();
+                Eigen::Vector3d backLightVec_c = (backLight - c).normalized();
+                lambert[2] = float(mainLightVec_c.dot(nc) * mainLightIntensity
+                                 + backLightVec_c.dot(nc) * backLightIntensity)
+                             * 255;
+                if (lambert[2] <= 0.0) continue;
+                paintTriangleBary<uint8_t>(
+                        renderedGray, image_size, projected,
+                        faces[i].second, lambert);
+            }
+        }
+        return renderedGray;
     }
 
     cv::Mat AvatarRenderer::renderPartMask(const cv::Size& image_size, const std::vector<int>& part_map) const {
@@ -799,7 +870,7 @@ namespace ark {
             return;
         }
         sequencePath = seqPath.string();
-        
+
         std::ifstream metaIfs(metaPath.string());
         size_t nSubseq, frameSizeBytes, subseqStart;
         metaIfs >> nSubseq >> numFrames >> frameSizeBytes;
@@ -818,7 +889,7 @@ namespace ark {
             auto frameData = data.col(frame_id);
             ava.p.noalias() = frameData.head<3>();
             Eigen::Quaterniond q;
-            for (int i = 0; i < ava.r.size(); ++i) { 
+            for (int i = 0; i < ava.r.size(); ++i) {
                 q.coeffs().noalias() = frameData.segment<4>(i * 4 + 3);
                 ava.r[i].noalias() = q.toRotationMatrix();
             }
@@ -826,7 +897,7 @@ namespace ark {
             Eigen::VectorXd frameData = getFrame(frame_id);
             ava.p = frameData.head<3>();
             Eigen::Quaterniond q;
-            for (int i = 0; i < ava.r.size(); ++i) { 
+            for (int i = 0; i < ava.r.size(); ++i) {
                 q.coeffs().noalias() = frameData.segment<4>(i * 4 + 3);
                 ava.r[i].noalias() = q.toRotationMatrix();
             }

@@ -298,16 +298,16 @@ int main(int argc, char ** argv) {
                                         std::thread::hardware_concurrency());
                                 PROFILE(Optimize (Total));
                                 ark::AvatarRenderer rend(ava, intrin);
-                                cv::Mat modelMap = rend.renderDepth(depth.size());
-                                cv::Vec3b whiteColor(200, 200, 255);
+                                cv::Mat modelMap = rend.renderLambert(depth.size());
                                 for (int r = 0 ; r < rgbMap.rows; ++r) {
                                     auto* outptr = rgbMap.ptr<cv::Vec3b>(r);
-                                    const auto* renderptr = modelMap.ptr<float>(r);
+                                    const auto* renderptr = modelMap.ptr<uint8_t>(r);
                                     for (int c = 0 ; c < rgbMap.cols; ++c) {
                                         if (renderptr[c] > 0.0) {
-                                            outptr[c] = whiteColor *
-                                                (std::min(1.0, renderptr[c] / 3.0) * 4 / 5) +
-                                                outptr[c] / 5;
+                                            outptr[c] = 
+                                                cv::Vec3b(renderptr[c],
+                                                        renderptr[c], renderptr[c]) / 5 * 3 +
+                                                outptr[c] / 5 * 2;
                                         }
                                     }
                                 }

@@ -107,7 +107,7 @@ int main(int argc, char** argv) {
     ark::AvatarModel avaModel;
     ark::Avatar ava(avaModel);
     ark::AvatarOptimizer avaOpt(ava, intrin, background.size(), rtree.numParts, rtree.partMap);
-    avaOpt.betaPose = betaPose; 
+    avaOpt.betaPose = betaPose;
     avaOpt.betaShape = betaShape;
     avaOpt.nnStep = nnStep;
     avaOpt.enableOcclusion = !disableOcclusion;
@@ -213,21 +213,21 @@ int main(int argc, char** argv) {
                         icpIters = reinitICPIters;
                         PROFILE(Prepare reinit);
                     }
-                    avaOpt.optimize(dataCloud, dataPartLabels, 
+                    avaOpt.optimize(dataCloud, dataPartLabels,
                             icpIters,
                             std::thread::hardware_concurrency());
                     PROFILE(Optimize (Total));
                     printf("Overall (excluding visualization): %f ms\n", std::chrono::duration<double, std::milli>(std::chrono::high_resolution_clock::now() - ccstart).count());
                     ark::AvatarRenderer rend(ava, intrin);
-                    cv::Mat modelMap = rend.renderDepth(depth.size());
-                    cv::Vec3b whiteColor(255, 255, 255);
-                    for (int r = 0 ; r < image.rows; ++r) {
+                    // Draw avatar onto RGB using lambertian shading
+                    cv::Mat modelMap = rend.renderLambert(depth.size());
+                    for (int r = 0; r < vis.rows; ++r) {
                         auto* outptr = vis.ptr<cv::Vec3b>(r);
-                        const auto* renderptr = modelMap.ptr<float>(r);
-                        for (int c = 0 ; c < image.cols; ++c) {
-                            if (renderptr[c] > 0.0) {
-                                outptr[c] = whiteColor * (std::max(0.5, std::min(1.0, renderptr[c] / 3.0)));
-                                // outptr[c] * 0.1;
+                        const auto* renderptr = modelMap.ptr<uint8_t>(r);
+                        for (int c = 0; c < vis.cols; ++c) {
+                            if (renderptr[c] > 0) {
+                                outptr[c][0] = outptr[c][1]
+                                    = outptr[c][2] = renderptr[c];
                             }
                         }
                     }
@@ -238,7 +238,13 @@ int main(int argc, char** argv) {
                 auto* outptr = vis.ptr<cv::Vec3b>(r);
                 const auto* rgbptr = imageRGB.ptr<cv::Vec3b>(r);
                 for (int c = 0 ; c < image.cols; ++c) {
-                    outptr[c] = rgbptr[c] / 3 + (outptr[c] - rgbptr[c]) / 3 * 2;
+                    if (outptr[c][0] == 0 &&
+                        outptr[c][1] == 0 &&
+                        outptr[c][2] == 0) outptr[c] = rgbptr[c];
+                    else {
+                        // Blend
+                        outptr[c] = rgbptr[c] / 5 * 2 + outptr[c] / 5 * 3;
+                    }
                 }
             }
         } else {

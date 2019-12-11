@@ -35,11 +35,15 @@ namespace ark {
          *  Assumes camera is at 0,0,0 and looking in positive z direction */
         cv::Mat renderDepth(const cv::Size& image_size) const;
 
+        /** Render avatar as grayscale image given image size, based on Lambertian diffuse shading
+         *  Assumes camera is at 0,0,0 and looking in positive z direction */
+        cv::Mat renderLambert(const cv::Size& image_size) const;
+
         /** Render avatar part mask given image size
          *  Part mask is a CV_8U image where pixels assigned to part 0 has value 0, 1 has value 1, etc.
          *  Background pixels have value 255.
          *  Assumes camera is at 0,0,0 and looking in positive z direction
-         *  @param part_map optional array of integers specifying part id to assign for each joint; if not given, uses joint id 
+         *  @param part_map optional array of integers specifying part id to assign for each joint; if not given, uses joint id
          **/
         cv::Mat renderPartMask(const cv::Size& image_size, const std::vector<int>& part_map = {}) const;
 
