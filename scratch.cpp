@@ -318,7 +318,10 @@ int main(int argc, char** argv) {
     ava.update();
     ark::AvatarRenderer renderer(ava, intrin);
     cv::Mat m = renderer.renderLambert(size);
+    cv::Mat m2 = renderer.renderDepth(size);
     cv::imshow("Result", m);
+    cv::waitKey(0);
+    cv::imshow("Result", m2);
     cv::waitKey(0);
 
     return 0;

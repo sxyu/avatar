@@ -30,8 +30,8 @@
 
 #include "opencv2/imgcodecs.hpp"
 
-#define BEGIN_PROFILE auto start = std::chrono::high_resolution_clock::now()
-#define PROFILE(x) do{printf("%s: %f ms\n", #x, std::chrono::duration<double, std::milli>(std::chrono::high_resolution_clock::now() - start).count()); start = std::chrono::high_resolution_clock::now(); }while(false)
+#define BEGIN_PROFILE //auto start = std::chrono::high_resolution_clock::now()
+#define PROFILE(x) //do{printf("%s: %f ms\n", #x, std::chrono::duration<double, std::milli>(std::chrono::high_resolution_clock::now() - start).count()); start = std::chrono::high_resolution_clock::now(); }while(false)
 
 using namespace ark;
 
@@ -106,6 +106,9 @@ int main(int argc, char ** argv) {
 
 	printf("CONTROLS:\nQ or ESC to quit\n"
             "b to set background (also sets on first unpause, if -b not specified)\n"
+            "0-3 to show empty, RGB, depth, custom (ext_background.jpg)  background behind avatar\n"
+            "h to hide/show human bounding box from background subtraction\n"
+            "t to toggle random tree visualization/avatar tracking visualization\n"
             "SPACE to start/pause\n\n");
 
 	// Seed the rng
@@ -125,7 +128,9 @@ int main(int argc, char ** argv) {
     if (rtreePath.size()) rtree.loadFile(rtreePath);
 
     ark::AvatarModel avaModel;
-    ark::Avatar ava(avaModel);
+    ark::AvatarModel avaModelCheap("", false);
+    ark::Avatar avaFull(avaModel);
+    ark::Avatar ava(avaModelCheap);
     ark::AvatarOptimizer avaOpt(ava, intrin, size, rtree.numParts, rtree.partMap);
     avaOpt.betaPose = betaPose;
     avaOpt.betaShape = betaShape;
@@ -139,6 +144,9 @@ int main(int argc, char ** argv) {
     if (bgPath.size()) {
         util::readXYZ(bgPath, bgsub.background, intrin);
     }
+
+    // Background image #3, any image at ./ext_background.jpg (optional)
+    cv::Mat extBackgroundImage = cv::imread("ext_background.jpg");
 
     // Previous centers of mass: required by RTree postprocessor
     Eigen::Matrix<double, 2, Eigen::Dynamic> comPre;
@@ -157,6 +165,12 @@ int main(int argc, char ** argv) {
 
     // Pausing feature: if true, demo is paused
     bool pause = true;
+
+    // Background type: 0 = none 1 = RGB 2 = depth 3 = ./ext_background.jpg
+    int backgroundType = 1;
+
+    // If true, shows bounding box of BG subtraction area
+    bool showBoundingBox = rtreeOnly;
 
     // When this flag is true, tracking will reinit the next frame
     bool reinit = true;
@@ -207,7 +221,21 @@ int main(int argc, char ** argv) {
 
             cv::Mat depth;
             cv::extractChannel(xyzMap, depth, 2);
-            // visualize
+
+            // Replace RGB stream with user-specified background
+            if (backgroundType == 0) {
+                rgbMap = cv::Mat::zeros(rgbMap.size(), CV_8UC3);
+            } else if (backgroundType == 2){
+                xyzMap.convertTo(rgbMap, CV_8UC3, 255.);
+            } else if (backgroundType == 3){
+                if (extBackgroundImage.empty()) {
+                    extBackgroundImage = cv::Mat::zeros(rgbMap.size(), CV_8UC3);
+                } else if (extBackgroundImage.size() != rgbMap.size()) {
+                    cv::resize(extBackgroundImage, extBackgroundImage, rgbMap.size());
+                }
+                extBackgroundImage.copyTo(rgbMap);
+            }
+
             cv::Mat visual, rgbMapFloat;
             if (!pause) {
                 if (!bgsub.background.empty()) {
@@ -298,16 +326,27 @@ int main(int argc, char ** argv) {
                                         std::thread::hardware_concurrency());
                                 PROFILE(Optimize (Total));
                                 ark::AvatarRenderer rend(ava, intrin);
+                                avaFull.r = ava.r;
+                                avaFull.w = ava.w;
+                                avaFull.p = ava.p;
+                                avaFull.update();
                                 cv::Mat modelMap = rend.renderLambert(depth.size());
                                 for (int r = 0 ; r < rgbMap.rows; ++r) {
                                     auto* outptr = rgbMap.ptr<cv::Vec3b>(r);
                                     const auto* renderptr = modelMap.ptr<uint8_t>(r);
                                     for (int c = 0 ; c < rgbMap.cols; ++c) {
-                                        if (renderptr[c] > 0.0) {
-                                            outptr[c] = 
-                                                cv::Vec3b(renderptr[c],
-                                                        renderptr[c], renderptr[c]) / 5 * 3 +
-                                                outptr[c] / 5 * 2;
+                                        if (renderptr[c] > 0) {
+                                            if (backgroundType == 1 ||
+                                                backgroundType == 2) {
+                                                outptr[c] = 
+                                                    cv::Vec3b(renderptr[c],
+                                                            renderptr[c], renderptr[c]) / 5 * 3 +
+                                                    outptr[c] / 5 * 2;
+                                            } else {
+                                                outptr[c] = 
+                                                    cv::Vec3b(renderptr[c],
+                                                            renderptr[c], renderptr[c]);
+                                            }
                                         }
                                     }
                                 }
@@ -319,53 +358,68 @@ int main(int argc, char ** argv) {
             rgbMap.convertTo(rgbMapFloat, CV_32FC3, 1. / 255.);
             // cv::hconcat(xyzMap, rgbMapFloat, visual);
             visual = rgbMapFloat;
-            for (int r = 0 ; r < visual.rows; ++r) {
-                auto* outptr = visual.ptr<cv::Vec3f>(r);
-                auto* xyzptr = xyzMap.ptr<cv::Vec3f>(r);
-                for (int c = 0 ; c < visual.cols; ++c) {
-                    if (xyzptr[c][2] == 0.0f) {
-                        // Since depth camera's FoV is actually
-                        // smaller than RGB FoV visible,
-                        // try to make user aware of
-                        // depth boundaries by darkening areas with
-                        // no depth info
-                        outptr[c] *= 0.5;
+            if (backgroundType == 1) {
+                for (int r = 0 ; r < visual.rows; ++r) {
+                    auto* outptr = visual.ptr<cv::Vec3f>(r);
+                    auto* xyzptr = xyzMap.ptr<cv::Vec3f>(r);
+                    for (int c = 0 ; c < visual.cols; ++c) {
+                        if (xyzptr[c][2] == 0.0f) {
+                            // Since depth camera's FoV is actually
+                            // smaller than RGB FoV visible,
+                            // try to make user aware of
+                            // depth boundaries by darkening areas with
+                            // no depth info
+                            outptr[c] *= 0.5;
+                        }
                     }
                 }
             }
             const int MAX_COLS = 1300;
-            cv::rectangle(visual, bgsub.topLeft, bgsub.botRight, cv::Scalar(0,0,255));
+            if (showBoundingBox) {
+                cv::rectangle(visual, bgsub.topLeft, bgsub.botRight, cv::Scalar(0,0,255));
+            }
             if (visual.cols > MAX_COLS) {
                 cv::resize(visual, visual, cv::Size(MAX_COLS, MAX_COLS * visual.rows / visual.cols));
             }
-            cv::imshow(camera->getModelName() + " XYZ/RGB Maps", visual);
+            cv::imshow(camera->getModelName() + " Results", visual);
         }
 
         int c = cv::waitKey(1);
 
         // make case insensitive (convert to upper)
         if (c >= 'a' && c <= 'z') c &= 0xdf;
-        if (c == 'B') {
-            bgsub.background = xyzMap;
-            std::cout << "Note: background updated.\n";
-        }
-
-        // 27 is ESC
         if (c == 'Q' || c == 27) {
+            // 27 is ESC
             break;
         }
-        else if (c == ' ') {
-            if (bgsub.background.empty()) {
+        if (c >= '0' && c <= '3') {
+            backgroundType = c - '0';
+            std::cout << "Background: " << backgroundType << "\n";
+        }
+        switch (c) {
+            case 'B':
                 bgsub.background = xyzMap;
-                std::cout << "Note: unpaused, background updated.\n";
-            }
-            pause = !pause;
-            if (pause) reinit = true;
+                std::cout << "Note: background updated.\n";
+                break;
+            case 'H':
+                showBoundingBox = !showBoundingBox;
+                std::cout << "Bounding box visible: " << std::boolalpha << showBoundingBox << "." << std::endl;
+                break;
+            case 'T':
+                rtreeOnly = !rtreeOnly;
+                std::cout << "Random tree visulization mode: " << std::boolalpha << showBoundingBox << "." << std::endl;
+                break;
+            case ' ':
+                if (bgsub.background.empty()) {
+                    bgsub.background = xyzMap;
+                    std::cout << "Note: unpaused, background updated.\n";
+                }
+                pause = !pause;
+                if (pause) reinit = true;
+                break;
         }
     }
     camera->endCapture();
-    cv::destroyWindow(camera->getModelName() + " XYZ/RGB Maps");
-
     cv::destroyAllWindows();
     return 0;
 }

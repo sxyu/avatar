@@ -51,7 +51,7 @@ namespace ark {
          *                   Joint 0 is expected to be root.
          * @param limit_one_joint_per_point only use one assigned joint for each point. This improved performance at the cost of some accuracy.
          */
-        explicit AvatarModel(const std::string & model_dir = "", bool limit_one_joint_per_point = true);
+        explicit AvatarModel(const std::string & model_dir = "", bool limit_one_joint_per_point = false);
 
         /** Get number of joints */
         inline int numJoints() const { return parent.rows(); }

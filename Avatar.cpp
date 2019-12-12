@@ -130,7 +130,7 @@ namespace {
                 std::swap(mlo, mhi);
                 std::swap(blo, bhi);
             }
-            for (int i = std::max(midyi, 0)+1; i <= maxyi; ++i) {
+            for (int i = std::max(midyi, 0)+(a.y != b.y); i <= maxyi; ++i) {
                 int minxi = std::max<int>(std::floor(mlo * i + blo), 0),
                     maxxi = std::min<int>(std::ceil(mhi * i + bhi), image_size.width-1);
                 if (minxi > maxxi) continue;
@@ -749,12 +749,10 @@ namespace ark {
         cv::Mat renderedGray = cv::Mat::zeros(image_size, CV_8U);
         const Eigen::Vector3d mainLight(0.8, 1.5, -1.2);
         const double mainLightIntensity = 0.8;
-        const Eigen::Vector3d backLight(-0.2, 3.5, 0.4);
+        const Eigen::Vector3d backLight(-0.2, -1.5, 0.4);
         const double backLightIntensity = 0.2;
         float lambert[3];
 
-        Eigen::VectorXi faceCnt(ava.model.numPoints());
-        faceCnt.setZero();
         std::vector<bool> visible(ava.model.numFaces());
         Eigen::Matrix<double, 3, Eigen::Dynamic> vertNormal(3, ava.model.numPoints());
         vertNormal.setZero();
@@ -763,16 +761,15 @@ namespace ark {
             auto& b = ava.cloud.col(faces[i].second[1]);
             auto& c = ava.cloud.col(faces[i].second[2]);
             Eigen::Vector3d normal = (b-a).cross(c-a).normalized();
-            visible[i] = normal.z() < -1e-8;
-            if (!visible[i]) continue;
             for (int j = 0; j < 3; ++j) {
-                ++faceCnt[faces[i].second[j]];
                 vertNormal.col(faces[i].second[j]) += normal;
             }
+            visible[i] = abs(normal.z()) > 1e-2;
         }
+        vertNormal.colwise().normalize();
         for (int i = 0; i < ava.model.numPoints();++i) {
-            if (faceCnt[i] == 0) continue;
-            vertNormal.col(i) /= faceCnt[i];
+            auto normal = vertNormal.col(i);
+            if (normal.z() > 0) normal = -normal;
         }
 
         for (int i = 0; i < ava.model.numFaces();++i) {
@@ -786,30 +783,24 @@ namespace ark {
             auto na = vertNormal.col(ai),
                  nb = vertNormal.col(bi),
                  nc = vertNormal.col(ci);
-            if (na.z() < 0.0 && nb.z() < 0.0 && nc.z() < 0.0) { // Visible face
-                // Eigen::Vector3d cen = (a+b+c) / 3.0;
-                Eigen::Vector3d mainLightVec_a = (mainLight - a).normalized();
-                Eigen::Vector3d backLightVec_a = (backLight - a).normalized();
-                lambert[0] = float(mainLightVec_a.dot(na) * mainLightIntensity
-                                 + backLightVec_a.dot(na) * backLightIntensity)
-                             * 255;
-                if (lambert[0] <= 0.0) continue;
-                Eigen::Vector3d mainLightVec_b = (mainLight - b).normalized();
-                Eigen::Vector3d backLightVec_b = (backLight - b).normalized();
-                lambert[1] = float(mainLightVec_b.dot(nb) * mainLightIntensity
-                                 + backLightVec_b.dot(nb) * backLightIntensity)
-                             * 255;
-                if (lambert[1] <= 0.0) continue;
-                Eigen::Vector3d mainLightVec_c = (mainLight - c).normalized();
-                Eigen::Vector3d backLightVec_c = (backLight - c).normalized();
-                lambert[2] = float(mainLightVec_c.dot(nc) * mainLightIntensity
-                                 + backLightVec_c.dot(nc) * backLightIntensity)
-                             * 255;
-                if (lambert[2] <= 0.0) continue;
-                paintTriangleBary<uint8_t>(
-                        renderedGray, image_size, projected,
-                        faces[i].second, lambert);
-            }
+            Eigen::Vector3d mainLightVec_a = (mainLight - a).normalized();
+            Eigen::Vector3d backLightVec_a = (backLight - a).normalized();
+            lambert[0] = std::max(float(mainLightVec_a.dot(na) * mainLightIntensity
+                        + backLightVec_a.dot(na) * backLightIntensity)
+                    * 255, 0.f);
+            Eigen::Vector3d mainLightVec_b = (mainLight - b).normalized();
+            Eigen::Vector3d backLightVec_b = (backLight - b).normalized();
+            lambert[1] = std::max(float(mainLightVec_b.dot(nb) * mainLightIntensity
+                        + backLightVec_b.dot(nb) * backLightIntensity)
+                    * 255, 0.f);
+            Eigen::Vector3d mainLightVec_c = (mainLight - c).normalized();
+            Eigen::Vector3d backLightVec_c = (backLight - c).normalized();
+            lambert[2] = std::max(float(mainLightVec_c.dot(nc) * mainLightIntensity
+                        + backLightVec_c.dot(nc) * backLightIntensity)
+                    * 255, 0.f);
+            paintTriangleBary<uint8_t>(
+                    renderedGray, image_size, projected,
+                    faces[i].second, lambert);
         }
         return renderedGray;
     }
