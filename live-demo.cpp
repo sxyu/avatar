@@ -104,14 +104,14 @@ int main(int argc, char ** argv) {
         return 1;
     }
 
-	printf("CONTROLS:\nQ or ESC to quit\n"
+    printf("CONTROLS:\nQ or ESC to quit\n"
             "b to set background (also sets on first unpause, if -b not specified)\n"
             "0-3 to show empty, RGB, depth, custom (ext_background.jpg)  background behind avatar\n"
             "h to hide/show human bounding box from background subtraction\n"
             "t to toggle random tree visualization/avatar tracking visualization\n"
             "SPACE to start/pause\n\n");
 
-	// Seed the rng
+    // Seed the rng
     srand(time(NULL));
 
     CameraIntrin intrin;
@@ -338,12 +338,12 @@ int main(int argc, char ** argv) {
                                         if (renderptr[c] > 0) {
                                             if (backgroundType == 1 ||
                                                 backgroundType == 2) {
-                                                outptr[c] = 
+                                                outptr[c] =
                                                     cv::Vec3b(renderptr[c],
                                                             renderptr[c], renderptr[c]) / 5 * 3 +
                                                     outptr[c] / 5 * 2;
                                             } else {
-                                                outptr[c] = 
+                                                outptr[c] =
                                                     cv::Vec3b(renderptr[c],
                                                             renderptr[c], renderptr[c]);
                                             }
@@ -407,7 +407,7 @@ int main(int argc, char ** argv) {
                 break;
             case 'T':
                 rtreeOnly = !rtreeOnly;
-                std::cout << "Random tree visulization mode: " << std::boolalpha << showBoundingBox << "." << std::endl;
+                std::cout << "Random tree visulization mode: " << std::boolalpha << rtreeOnly << "." << std::endl;
                 break;
             case ' ':
                 if (bgsub.background.empty()) {
