@@ -33,6 +33,11 @@ namespace ark {
                     int minc = std::max(cc - size, 0), maxc = std::min(cc + size, background.cols - 1);
                     int minr = std::max(rr - size, 0), maxr = std::min(rr + size, background.rows - 1);
                     // float best_norm = std::numeric_limits<float>::max();
+                    const cv::Vec3f bg_val = background.at<cv::Vec3f>(rr, cc);
+                    if (bg_val[2] == 0.0) {
+                        invalid_bit = INVALID;
+                        return;
+                    }
                     for (int r = minr; r <= maxr; ++r) {
                         const cv::Vec3f* rptr = background.ptr<cv::Vec3f>(r);
                         for (int c = minc; c <= maxc; ++c) {
@@ -46,6 +51,7 @@ namespace ark {
                             }
                         }
                     }
+
                 };
                 auto worker = [&] () {
                     int rr = 0;
