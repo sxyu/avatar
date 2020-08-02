@@ -16,7 +16,10 @@ A smaller reimplementation of OpenARK Avatar using only analytic derivatives.
     - This is very performance critical, and it is strongly recommended to manually build Ceres with LAPACK and OpenMP support.   
     - If you are using an Intel processor, it is also recommended to use MKL as BLAS/LAPACK. Otherwise ATLAS is recommended.
     - Finally, make sure you build Ceres in release mode.
-- K4A (Azure Kinect SDK), optional but required for live-demo
+- zlib, for reading SMPL npz model
+- One of (optional but required for live-demo)
+    - K4A (Azure Kinect SDK)
+    - libfreenect2
 - PCL 1.8+, optional
 
 Earlier versions of these libraries may work, but I have not tested them
@@ -38,7 +41,7 @@ For unknown reasons, sometimes I encounter linker errors when not manually linki
 
 #### Core
 - `live-demo`: from `live-demo.cpp`. Live demo, runs the system end-to-end on Azure Kinect camera input. Requires K4A library to be installed
-- `bgsubtract` : from `bgsubtract.cpp`. Somewhat of a misnomer, runs the system end-to-end on an OpenARK dataset in standard format (depth_exr, etc)
+- `demo` : from `demo.cpp`. Runs the system end-to-end on an OpenARK dataset in standard format (depth_exr, etc)
 - `data-recording` : from `DataRecording.cpp`. Tool for recording datasets from the Azure Kinect camera. Mostly copied from OpenARK, but fixes memory bug.
 - `libsmplsynth.a` : the static library which the above depend on. I configure the project like this to improve build times when editing different outputs.
 

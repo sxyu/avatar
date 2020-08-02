@@ -10,16 +10,16 @@
 #include <Avatar.h>
 
 namespace ark {
-    /** OpenARK Avatar PCL integration */
-    namespace avatar_pcl {
-        /** Get PCL point cloud of Avatar's points */
-        pcl::PointCloud<pcl::PointXYZ>::Ptr getCloud(const Avatar& ava);
+/** OpenARK Avatar PCL integration */
+namespace avatar_pcl {
+/** Get PCL point cloud of Avatar's points */
+pcl::PointCloud<pcl::PointXYZ>::Ptr getCloud(const Avatar& ava);
 
-        /** Get PCL point cloud of Avatar's joints */
-        pcl::PointCloud<pcl::PointXYZ>::Ptr getJointCloud(const Avatar& ava);
+/** Get PCL point cloud of Avatar's joints */
+pcl::PointCloud<pcl::PointXYZ>::Ptr getJointCloud(const Avatar& ava);
 
-        /** Get PCL polygon mesh for avatar's skin
-         *  (undefined behavior if avatar has no mesh: !avatar.hasMesh()) */
-        pcl::PolygonMesh::Ptr getMesh(const Avatar& ava);
-    }
-}
+/** Get PCL polygon mesh for avatar's skin
+ *  (undefined behavior if avatar has no mesh: !avatar.hasMesh()) */
+pcl::PolygonMesh::Ptr getMesh(const Avatar& ava);
+}  // namespace avatar_pcl
+}  // namespace ark

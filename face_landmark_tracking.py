@@ -3,10 +3,19 @@ import sys, datetime
 import glob
 import dlib
 import math
+import os
 from time import sleep
 from shapely.geometry import Polygon
 
 import numpy as np
+
+# Kinect Azure intrinsics
+FX = -622.359
+CX = 641.666
+FY = -620.594
+CY = 352.072
+
+FRAME_W, FRAME_H = 1280, 720
 
 GREEN = (0, 255, 0)
 BLUE = (255, 0, 0)
@@ -31,6 +40,10 @@ LANDMARK_OPENCV=0
 LANDMARK_DLIB = 1
 LANDMARK_DETECTOR=LANDMARK_DLIB
 
+#  DATASET_PATH = '/mnt_d/Programming/0VR/OpenARK/data/avatar-dataset/car_exr/mount-tripod-loop'
+DATASET_PATH = '/mnt_d/Programming/0VR/OpenARK/data/avatar-dataset/car_exr/mount-tripod-eye-open-close'
+#  DATASET_PATH = '/mnt_d/Programming/0VR/OpenARK/data/avatar-dataset/car_exr/mount-tripod-real-road'
+
 # Approximated face points. This can be replaced by real-world 3D face points
 # This is using orthographic projection approximation in image coordinates
 model_3D_points = np.array([
@@ -43,7 +56,13 @@ model_3D_points = np.array([
                         ])
 
 # Set fixed image resize resolution in opencv convension
-resize_size = (640, 360)
+#  resize_size = (640, 360)
+resize_size = (960, 480)
+
+FX_SHR = FX * (resize_size[0] / FRAME_W)
+CX_SHR = CX * (resize_size[0] / FRAME_W)
+FY_SHR = FY * (resize_size[1] / FRAME_H)
+CY_SHR = CY * (resize_size[1] / FRAME_H)
 
 # Approximated camera intrinsic parameters
 focal_length = resize_size[0]
@@ -251,8 +270,8 @@ class FacemarkDetectorDlib():
         if bbox:
             # reduce bbox high due to dlib training on square face boxes
             delta = bbox[3] - bbox[2]
-            if delta>0:
-                bbox = (bbox[0], bbox[1] + delta//2, bbox[2], bbox[3]-delta//2)
+            #  if delta>0:
+            #      bbox = (bbox[0], bbox[1] + delta//2, bbox[2], bbox[3]-delta//2)
             rect = bb_to_rect(bbox)
             shape = self.predictor(frame, rect)
             points = dlib_full_obj_to_np(shape)
@@ -297,7 +316,7 @@ class Pipeline():
         landmarks = self.facemark_detector.detect(frame, facebox)
         return landmarks
 
-def facial_orientation(bboxes, landmarks):
+def facial_orientation(bboxes, landmarks, xyz):
     image_points = np.array([
         (0, 0),     # Nose tip
         (0, 0),     # Mouth center
@@ -313,13 +332,48 @@ def facial_orientation(bboxes, landmarks):
     image_points[3] = [bboxes[2][0]+bboxes[2][2]/2, bboxes[2][1]+bboxes[2][3]/2]
     image_points[4] = landmarks[16]
     image_points[5] = landmarks[18]
-    (success, rotation_vector, translation_vector) = cv2.solvePnP(model_3D_points, image_points, camera_matrix, camera_dist_coeffs, flags=cv2.SOLVEPNP_ITERATIVE)               
+    #  points_3d = np.zeros((6, 3));
+    #  for i in range(points_3d.shape[0]):
+    #      py = min(int(image_points[i,1]), xyz.shape[0]-1)
+    #      px = min(int(image_points[i,0]), xyz.shape[1]-1)
+    #      points_3d[i, :] = xyz[py, px]
+    (success, rotation_vector, translation_vector) = cv2.solvePnP(model_3D_points, image_points, camera_matrix, camera_dist_coeffs, flags=cv2.SOLVEPNP_ITERATIVE)
+    #  (success, rotation_vector, translation_vector) = cv2.solvePnP(points_3d, image_points, camera_matrix, camera_dist_coeffs, flags=cv2.SOLVEPNP_ITERATIVE)
     camera_para = (rotation_vector, translation_vector)
     
     # The following are for debugging purposes of drawing orientation
-    (nose_end_point2D, jacobian) = cv2.projectPoints(np.array([(0.0, 0.0, 200.0)]), rotation_vector, translation_vector, camera_matrix, camera_dist_coeffs)
-    p1 = ( int(image_points[0][0]), int(image_points[0][1]))
-    p2 = ( int(nose_end_point2D[0][0][0]), int(nose_end_point2D[0][0][1]))
+    #  (nose_end_point2D, jacobian) = cv2.projectPoints(np.array([(0.0, 0.0, 200.0)]), rotation_vector, translation_vector, camera_matrix, camera_dist_coeffs)
+    #  p1 = ( int(image_points[0][0]), int(image_points[0][1]))
+    # 0 nose
+    # 4 R eye
+    p1 = ( int(landmarks[0][0]), int(landmarks[0][1]))
+    
+    p1_3d = xyz[min(int(landmarks[0][1]), xyz.shape[0]-1),
+                min(int(landmarks[0][0]), xyz.shape[1]-1)]
+    mouth_3d = xyz[min(int(landmarks[17][1]), xyz.shape[0]-1),
+                min(int(landmarks[17][0]), xyz.shape[1]-1)]
+    leye_3d = xyz[min(int(landmarks[4][1]), xyz.shape[0]-1),
+               min(int(landmarks[4][0]), xyz.shape[1]-1)]
+    meye_3d = xyz[min(int((landmarks[4][1] + landmarks[13][1]) /2), xyz.shape[0]-1),
+               min(int((landmarks[4][0] + landmarks[13][0]) /2), xyz.shape[1]-1)]
+    #  meye_3d = (leye_3d + reye_3d) / 2
+    v_up =  meye_3d - mouth_3d 
+    v_right = meye_3d - leye_3d
+              
+    v_fwd = np.cross(v_up, v_right)
+    norm = np.linalg.norm(v_fwd)
+    if norm == 0.0:
+        # Vector is zero
+        p2 = p1
+    else:
+        v_fwd /= norm
+        p2_3d = p1_3d - v_fwd * 0.15
+        if p2_3d[2] == 0:
+            # Invalid point
+            p2 = p1
+        else:
+            p2 = ( int(p2_3d[0] * FX_SHR / p2_3d[2] + CX_SHR),
+                   int(p2_3d[1] * FY_SHR / p2_3d[2] + CY_SHR))
     return camera_para, p1, p2
 
 def boxes_overlap(box1, box2):
@@ -352,7 +406,7 @@ def boxes_overlap(box1, box2):
 
 def run():
     # init video stream
-    video_capture = cv2.VideoCapture(0)
+    #  video_capture = cv2.VideoCapture(0)
 
     # init detection pipeline
     pipeline = Pipeline()
@@ -365,13 +419,50 @@ def run():
     tracker_list=[]
     default_stop = False
 
+    class mock_video_capture:
+        def __init__(self, path):
+            self.rgb_frames = sorted(glob.glob(os.path.join(path, 'rgb/*.jpg')))
+            self.depth_frames = sorted(glob.glob(os.path.join(path, 'depth_exr/*.exr')))
+            self.cols = None
+            self.idx = 0
+        def read(self):
+            if self.idx >= len(self.rgb_frames):
+                return False, None
+            frame = cv2.imread(self.rgb_frames[self.idx])
+            self.idx += 1
+            return True, frame
+        def read_depth(self):
+            frame = cv2.imread(self.depth_frames[self.idx], cv2.IMREAD_ANYCOLOR | cv2.IMREAD_ANYDEPTH)
+            return frame
+        def read_xyz(self):
+            depth = cv2.imread(self.depth_frames[self.idx-1], cv2.IMREAD_ANYCOLOR | cv2.IMREAD_ANYDEPTH)
+
+            if self.cols is None:
+                self.cols = np.zeros(depth.shape, dtype=np.float32)
+                self.rows = np.zeros(depth.shape, dtype=np.float32)
+                for i in range(depth.shape[1]):
+                    self.cols[:, i] = i - CX
+                for i in range(depth.shape[0]):
+                    self.rows[i, :] = i - CY
+                self.cols /= FX
+                self.rows /= FY
+
+            xyz_map = np.zeros((*depth.shape, 3), dtype=np.float32)
+            xyz_map[:,:,0] = self.cols * depth
+            xyz_map[:,:,1] = self.rows * depth
+            xyz_map[:,:,2] = depth
+            return xyz_map
+
+    video_capture = mock_video_capture(DATASET_PATH)
+
+    output_video = cv2.VideoWriter('out.mp4', 0x21, 15, resize_size, True)
     while not default_stop:
-
         return_value, frame = video_capture.read()
-        frame = cv2.resize(frame, resize_size, interpolation = cv2.INTER_AREA)
-
         if return_value==False:
             break
+        frame_xyz = video_capture.read_xyz()
+        frame = cv2.resize(frame, resize_size, interpolation = cv2.INTER_AREA)
+        frame_xyz = cv2.resize(frame_xyz, resize_size, interpolation = cv2.INTER_NEAREST)
 
         if DEBUG:
             # if debugging, copy the current frame for augmenting visual results
@@ -414,12 +505,12 @@ def run():
                             tracked_faces[tracked_face_index] = faces[face_index]
                             # Then remove faces entry from initialization
                             faces[face_index]=[]
-                            continue
+                            break
 
-            if DEBUG:
+            #  if DEBUG:
                 # augment detected faces in the frame
-                draw_boxes(display_frame, faces, new_face_color)
-                draw_boxes(display_frame, tracked_faces, tracked_face_color)
+                #  draw_boxes(display_frame, faces, new_face_color)
+                #  draw_boxes(display_frame, tracked_faces, tracked_face_color)
 
         # Stage 2: Initialize New Trackers. When new face detected, initiate tracker(s)
         for face_index in range(len(faces)):
@@ -442,12 +533,12 @@ def run():
                 tracked_faces_status.append(STATE_INIT)
                 
                 # Calculate face orientation
-                camera_para, p1, p2 = facial_orientation(bboxes, landmarks)
+                camera_para, p1, p2 = facial_orientation(bboxes, landmarks, frame_xyz)
                 tracked_faces_orientation.append(camera_para)
 
                 if DEBUG:
                     # draw detected landmarks
-                    draw_boxes(display_frame, bboxes, new_landmarks_color)
+                    #  draw_boxes(display_frame, bboxes, new_landmarks_color)
                     draw_points(display_frame, landmarks, RED)
                     cv2.line(display_frame, p1, p2, (255,0,0), 2)
 
@@ -497,11 +588,11 @@ def run():
                         total_feature_area = total_feature_area + bbox[2]*bbox[3]
                         bboxes.append(bbox)
 
-                    camera_para, p1, p2 = facial_orientation(bboxes, new_landmarks)
+                    camera_para, p1, p2 = facial_orientation(bboxes, new_landmarks, frame_xyz)
                     tracked_faces_orientation[face_index] = camera_para
 
                     if DEBUG:
-                        draw_boxes(display_frame, bboxes, tracked_landmarks_color)
+                        #  draw_boxes(display_frame, bboxes, tracked_landmarks_color)
                         cv2.line(display_frame, p1, p2, (255,0,0), 2)
 
 
@@ -528,9 +619,11 @@ def run():
         if DEBUG:
             # if debugging, display display_frame
             cv2.imshow('Video', display_frame)
+            output_video.write(display_frame)
             pressed_key=cv2.waitKey(10) & 0xFF
             if pressed_key==27 or pressed_key==ord('q'):
                 default_stop = True
+    output_video.release()
 
 
 if __name__ == '__main__':

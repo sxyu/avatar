@@ -1,8 +1,9 @@
 #pragma once
 
-@_AZURE_KINECT_SDK_@#define AZURE_KINECT_ENABLED
-@_AZURE_KINECT_SDK_@#define OPENARK_CAMERA_TYPE "azurekinect"
+@_AZURE_KINECT_SDK_@#define OPENARK_AZURE_KINECT_ENABLED
+@_FREENECT2_@#define OPENARK_FREENECT2_ENABLED
 @_WITH_PCL_@#define OPENARK_PCL_ENABLED
+#define OPENARK_PREFERRED_CAMERA @_PREFERRED_CAMERA_@
 
 #define OPENARK_VERSION_MAJOR @OpenARK_VERSION_MAJOR@
 #define OPENARK_VERSION_MINOR @OpenARK_VERSION_MINOR@
@@ -16,21 +17,6 @@
 // Constants
 #ifndef M_PI
     #define M_PI 3.14159265358979323846
-#endif
-
-// Custom assertion statement that prints out a message
-#if !defined(NDEBUG) || defined(ARK_DEBUG)
-#   define ARK_ASSERT(condition, message) \
-    do { \
-        if (!(condition)) { \
-             std::cerr << "OpenARK assertion '" << (#condition) << "' failed in " << \
-              __FILE__ << " at line " << __LINE__ << ": " << message << "\n"; \
-            std::terminate(); \
-        } \
-    } while (false)
-#else
-// disable assert if not debugging
-#  define ARK_ASSERT(condition, message) do { } while (false)
 #endif
 
 // Necessary for typedefs
@@ -58,3 +44,4 @@ namespace ark {
     typedef cv::Vec3d Vec3d;
     typedef cv::Vec3i Vec3i;
 }
+

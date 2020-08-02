@@ -1,4 +1,4 @@
-cmake_minimum_required( VERSION 2.8 )
+cmake_minimum_required( VERSION 3.3 )
 
 if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Release)
@@ -6,15 +6,16 @@ endif()
 
 project( smplsynth )
 option( WITH_PCL "Enable PCL" OFF )
-option( WITH_K4A "Enable K4A (Azure Kinect); needed for demo" ON )
+option( WITH_K4A "Enable K4A (Azure Kinect); either this or FREENECT2 needed for demo" ON )
+option( WITH_FREENECT2 "Enable Freenect2 (Kinect v2); either this or K4A needed for demo" ON )
 option( WITH_OMP "Enable OMP" OFF )
-option( BUILD_RTREE_TOOLS "Build random forest tools" ON )
-option( OPENARK_FFAST_MATH "Enable ffast-math compiler flag, may cause numerical problems" ON )
+option( BUILD_RTREE_TOOLS "Build random forest tools" OFF )
 
 set( INCLUDE_DIR "${PROJECT_SOURCE_DIR}/include" )
 
 set( CMAKE_CXX_STACK_SIZE "10000000" )
-set( CMAKE_CXX_STANDARD 11 )
+set( CMAKE_CXX_STANDARD 14 )
+set( CMAKE_CXX_STANDARD_REQUIRED ON)
 set( CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake_modules" )
 if (WIN32)
     set( COLOR_TERM OFF )
@@ -27,44 +28,40 @@ if( NOT CMAKE_BUILD_TYPE )
 endif()
 
 set( PROJ_NAME "smplsynth" )
-set( LIB_NAME "libsmplsynth" )
+set( LIB_NAME "avatar" )
 set( SYNTH_NAME "smplsynth" )
-set( OUTPUT_NAME "smplsynth" )
-
-include( CheckCXXCompilerFlag )
-CHECK_CXX_COMPILER_FLAG( "-std=c++11" COMPILER_SUPPORTS_CXX11 )
-CHECK_CXX_COMPILER_FLAG( "-std=c++0x" COMPILER_SUPPORTS_CXX0X )
-
-if( COMPILER_SUPPORTS_CXX11 )
-    set( CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11" )
-elseif( COMPILER_SUPPORTS_CXX0X )
-    set( CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++0x" )
-else()
-    message( STATUS "The compiler ${CMAKE_CXX_COMPILER} has no C++11 support. Please use a different C++ compiler." )
-endif()
+set( VENDOR_DIR "${PROJECT_SOURCE_DIR}/3rdparty" )
+set( MESHVIEW_DIR "${VENDOR_DIR}/meshview" )
 
 if ( CMAKE_COMPILER_IS_GNUCXX OR (CMAKE_CXX_COMPILER_ID MATCHES "Clang") )
     set( CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-deprecated -Wno-deprecated-declarations -O3 -funroll-loops -g" )
-    if( ${OPENARK_FFAST_MATH} )
-        set( CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -ffast-math" )
-    endif()
-elseif( MSVC )
-    if( ${OPENARK_FFAST_MATH} )
-        set( CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /fp:fast" )
-    endif()
 endif ( )
 
-if( NOT DEFINED EIGEN_INCLUDE_DIRS )
-    if ( DEFINED Eigen_DIR )
-        set( EIGEN_INCLUDE_DIRS ${Eigen_DIR} )
-    endif ( DEFINED Eigen_DIR )
-endif( NOT DEFINED EIGEN_INCLUDE_DIRS )
-if ( NOT DEFINED Eigen_DIR )
-    find_package( Eigen QUIET )
-endif ( NOT DEFINED Eigen_DIR )
-set( EIGEN_INCLUDE_DIR ${EIGEN_INCLUDE_DIRS} )
-include_directories(${EIGEN_INCLUDE_DIRS})
-message(STATUS "Found Eigen: ${EIGEN_INCLUDE_DIRS}")
+# Git submodule auto update
+# https://cliutils.gitlab.io/modern-cmake/chapters/projects/submodule.html
+find_package(Git QUIET)
+if(GIT_FOUND AND EXISTS "${PROJECT_SOURCE_DIR}/.git")
+    # Update submodules as needed
+    option(GIT_SUBMODULE "Check submodules during build" ON)
+    if(GIT_SUBMODULE)
+        message(STATUS "Running update --init --recursive")
+        execute_process(COMMAND ${GIT_EXECUTABLE} submodule update --init --recursive
+            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+            RESULT_VARIABLE GIT_SUBMOD_RESULT)
+        if(NOT GIT_SUBMOD_RESULT EQUAL "0")
+            message(FATAL_ERROR "git submodule update --init failed with ${GIT_SUBMOD_RESULT}, please checkout submodules")
+        endif()
+        message(STATUS "Submodule update done")
+    endif()
+endif()
+
+if(NOT EXISTS "${MESHVIEW_DIR}/CMakeLists.txt")
+   message(FATAL_ERROR "A submodule as not downloaded! GIT_SUBMODULE was turned off or failed. Please update submodules and try again.")
+endif()
+
+find_package(Eigen3 REQUIRED NO_MODULE)
+find_package(Threads REQUIRED)
+find_package(ZLIB REQUIRED)
 
 # require K4A?
 set( k4a_FOUND OFF )
@@ -79,6 +76,23 @@ if ( ${WITH_K4A} )
 else()
     message( STATUS "K4A (Azure Kinect SDK) disabled, configure with -DWITH_K4A=ON to enable" )
 endif ()
+
+set( freenect2_FOUND OFF )
+if ( ${WITH_FREENECT2} )
+    find_package( freenect2 )
+    if( freenect2_FOUND )
+      message( STATUS "Found libfreenect2" )
+    else()
+      message( STATUS "libfreenect2 not found" )
+    endif( freenect2_FOUND )
+    set( _FOUND_CAMERA_LIB ON )
+else()
+    message( STATUS "Freenect2 disabled, configure with -DWITH_FREENECT2=ON to enable" )
+endif ()
+
+# Meshview
+SET(MESHVIEW_BUILD_EXAMPLE OFF CACHE BOOL "meshview example" FORCE)
+add_subdirectory(${MESHVIEW_DIR})
 
 # require OpenCV
 find_package( OpenCV REQUIRED )
@@ -120,33 +134,38 @@ if ( ${WITH_OMP} )
 endif()
 
 include_directories(
+    ${CMAKE_CURRENT_BINARY_DIR}/include
     ${INCLUDE_DIR}
     ${OpenCV_INCLUDE_DIRS}
     ${PCL_INCLUDE_DIRS}
     ${CERES_INCLUDE_DIRS}
     ${Boost_INCLUDE_DIRS}
 )
- 
+
 set(
   DEPENDENCIES
+  ${CMAKE_THREAD_LIBS_INIT}
   ${OpenCV_LIBRARIES}
   ${PCL_LIBRARIES}
   ${CERES_LIBRARIES}
   ${Boost_LIBRARIES}
+  ZLIB::ZLIB
+  Eigen3::Eigen
 )
 
 set(
   SOURCES
-  Avatar.cpp 
-  BGSubtractor.cpp 
-  DepthCamera.cpp 
-  RTree.cpp 
+  Avatar.cpp
+  BGSubtractor.cpp
+  DepthCamera.cpp
+  RTree.cpp
   AvatarOptimizer.cpp
-  Calibration.cpp 
-  GaussianMixture.cpp 
+  Calibration.cpp
+  GaussianMixture.cpp
   SparseImage.cpp
-  Util.cpp 
-  ViconSkeleton.cpp 
+  Util.cpp
+  ViconSkeleton.cpp
+  cnpy.cpp
 )
 
 set(
@@ -161,22 +180,48 @@ set(
   ${INCLUDE_DIR}/RTree.h
   ${INCLUDE_DIR}/SparseImage.h
   ${INCLUDE_DIR}/Util.h
+  ${INCLUDE_DIR}/UtilCnpy.h
   ${INCLUDE_DIR}/ViconSkeleton.h
   ${INCLUDE_DIR}/nanoflann.hpp
+  ${INCLUDE_DIR}/cnpy.h
 )
 
 #  Set up configs
+set (FOUND_CAMERA_LIB FALSE)
 if( NOT k4a_FOUND )
   set( _AZURE_KINECT_SDK_ "//" )
 else()
+  set( _AZURE_KINECT_SDK_ "" )
   set( SOURCES ${SOURCES} AzureKinectCamera.cpp )
   set( HEADERS ${HEADERS} ${INCLUDE_DIR}/AzureKinectCamera.h )
-  set( DEPENDENCIES ${DEPENDENCIES} k4a::k4a )
+  list(APPEND DEPENDENCIES k4a::k4a)
+  if (NOT FOUND_CAMERA_LIB)
+      set(FOUND_CAMERA_LIB TRUE)
+      set( _PREFERRED_CAMERA_ "AzureKinectCamera" )
+  endif()
 endif( NOT k4a_FOUND )
+
+if( NOT freenect2_FOUND )
+  set( _FREENECT2_ "//" )
+else()
+  set( _FREENECT2_ "" )
+  set( SOURCES ${SOURCES} Freenect2Camera.cpp )
+  set( HEADERS ${HEADERS} ${INCLUDE_DIR}/Freenect2Camera.h )
+  list(APPEND DEPENDENCIES freenect2)
+  if (NOT FOUND_CAMERA_LIB)
+      set(FOUND_CAMERA_LIB TRUE)
+      set( _PREFERRED_CAMERA_ "Freenect2Camera" )
+  endif()
+endif( NOT freenect2_FOUND )
+
+if (NOT FOUND_CAMERA_LIB)
+    message (WARNING No camera lib found, live demo and data recoding will not be built)
+endif()
 
 if ( NOT PCL_FOUND )
     set( _WITH_PCL_ "//" )
 else()
+    set( _WITH_PCL_ "" )
     set( SOURCES ${SOURCES} AvatarPCL.cpp )
     set( HEADERS ${HEADERS} ${INCLUDE_DIR}/AvatarPCL.h )
 
@@ -188,19 +233,19 @@ else()
     endforeach()
 endif ()
 
-configure_file( Version.h.in ${INCLUDE_DIR}/Version.h )
-set( HEADERS ${HEADERS} ${INCLUDE_DIR}/Version.h )
+configure_file( Version.h.in "${PROJECT_BINARY_DIR}/include/Version.h" )
+set( HEADERS ${HEADERS} "${PROJECT_BINARY_DIR}/include/Version.h" )
 
 add_library( ${LIB_NAME} STATIC ${SOURCES} ${HEADERS} )
-set_target_properties( ${LIB_NAME} PROPERTIES OUTPUT_NAME ${OUTPUT_NAME} )
 target_link_libraries( ${LIB_NAME} ${DEPENDENCIES} )
 if ( PCL_FOUND )
     set_target_properties( ${LIB_NAME} PROPERTIES COMPILE_FLAGS ${TARGET_COMPILE_FLAGS} )
 endif()
 
+add_executable( smpl-viewer smpl-viewer.cpp )
+target_link_libraries( smpl-viewer ${DEPENDENCIES} ${LIB_NAME} meshview )
+
 add_executable( ${SYNTH_NAME} smplsynth.cpp )
-target_include_directories( ${SYNTH_NAME} PRIVATE ${INCLUDE_DIR} )
-set_target_properties( ${SYNTH_NAME} PROPERTIES OUTPUT_NAME ${OUTPUT_NAME} )
 target_link_libraries( ${SYNTH_NAME} ${DEPENDENCIES} ${LIB_NAME} )
 if ( PCL_FOUND )
     set_target_properties( ${SYNTH_NAME} PROPERTIES COMPILE_FLAGS ${TARGET_COMPILE_FLAGS} )
@@ -208,68 +253,59 @@ endif()
 
 if( PCL_FOUND )
     add_executable( scratch scratch.cpp )
-    target_include_directories( scratch PRIVATE ${INCLUDE_DIR} )
     target_link_libraries( scratch ${DEPENDENCIES} ${LIB_NAME} )
     set_target_properties( scratch PROPERTIES COMPILE_FLAGS ${TARGET_COMPILE_FLAGS} )
 endif()
 
-add_executable( bgsubtract bgsubtract.cpp )
-target_include_directories( bgsubtract PRIVATE ${INCLUDE_DIR} )
-target_link_libraries( bgsubtract ${DEPENDENCIES} ${LIB_NAME} )
+add_executable( demo demo.cpp )
+target_link_libraries( demo ${DEPENDENCIES} ${LIB_NAME} )
 if ( PCL_FOUND )
-    set_target_properties( bgsubtract PROPERTIES COMPILE_FLAGS ${TARGET_COMPILE_FLAGS} )
+    set_target_properties( demo PROPERTIES COMPILE_FLAGS ${TARGET_COMPILE_FLAGS} )
 endif()
 
-add_executable( smpltrim smpltrim.cpp )
-target_include_directories( smpltrim PRIVATE ${INCLUDE_DIR} )
-target_link_libraries( smpltrim ${DEPENDENCIES} ${LIB_NAME} )
-if ( PCL_FOUND )
-    set_target_properties( smpltrim PROPERTIES COMPILE_FLAGS ${TARGET_COMPILE_FLAGS} )
-endif()
+# add_executable( smpltrim smpltrim.cpp )
+# target_link_libraries( smpltrim ${DEPENDENCIES} ${LIB_NAME} )
+# if ( PCL_FOUND )
+#     set_target_properties( smpltrim PROPERTIES COMPILE_FLAGS ${TARGET_COMPILE_FLAGS} )
+# endif()
 
 # RTree stuff
 if ( ${BUILD_RTREE_TOOLS} )
     add_executable( rtree-train rtree-train.cpp )
-    target_include_directories( rtree-train PRIVATE ${INCLUDE_DIR} )
     target_link_libraries( rtree-train ${DEPENDENCIES} ${LIB_NAME} )
     if ( PCL_FOUND )
         set_target_properties( rtree-train PROPERTIES COMPILE_FLAGS ${TARGET_COMPILE_FLAGS} )
     endif()
 
     add_executable( rtree-transfer rtree-transfer.cpp )
-    target_include_directories( rtree-transfer PRIVATE ${INCLUDE_DIR} )
     target_link_libraries( rtree-transfer ${DEPENDENCIES} ${LIB_NAME} )
     if ( PCL_FOUND )
         set_target_properties( rtree-transfer PROPERTIES COMPILE_FLAGS ${TARGET_COMPILE_FLAGS} )
     endif()
 
     add_executable( rtree-run rtree-run.cpp )
-    target_include_directories( rtree-run PRIVATE ${INCLUDE_DIR} )
     target_link_libraries( rtree-run ${DEPENDENCIES} ${LIB_NAME} )
     if ( PCL_FOUND )
         set_target_properties( rtree-run PROPERTIES COMPILE_FLAGS ${TARGET_COMPILE_FLAGS} )
     endif()
 
     add_executable( rtree-run-dataset rtree-run-dataset.cpp )
-    target_include_directories( rtree-run-dataset PRIVATE ${INCLUDE_DIR} )
     target_link_libraries( rtree-run-dataset ${DEPENDENCIES} ${LIB_NAME} )
     if ( PCL_FOUND )
         set_target_properties( rtree-run-dataset PROPERTIES COMPILE_FLAGS ${TARGET_COMPILE_FLAGS} )
     endif()
 endif ()
 
-if ( k4a_FOUND )
+if ( FOUND_CAMERA_LIB )
     add_executable( live-demo live-demo.cpp )
-    target_include_directories( live-demo PRIVATE ${INCLUDE_DIR} )
     target_link_libraries( live-demo ${DEPENDENCIES} ${LIB_NAME} )
     if ( PCL_FOUND )
         set_target_properties( live-demo PROPERTIES COMPILE_FLAGS ${TARGET_COMPILE_FLAGS} )
     endif()
-endif ()
+endif ( FOUND_CAMERA_LIB )
 
-if( ${WITH_K4A} AND k4a_FOUND )
-    add_executable( data-recording DataRecording.cpp )
-    target_include_directories( data-recording PRIVATE ${INCLUDE_DIR} )
+if( ${WITH_K4A} AND FOUND_CAMERA_LIB  )
+    add_executable( data-recording data-recording.cpp )
     target_link_libraries( data-recording ${DEPENDENCIES} ${LIB_NAME} )
     if ( PCL_FOUND )
         set_target_properties( data-recording PROPERTIES COMPILE_FLAGS ${TARGET_COMPILE_FLAGS} )
@@ -278,6 +314,4 @@ endif ()
 
 if ( MSVC )
     set_property(TARGET ${PROJ_NAME} APPEND PROPERTY LINK_FLAGS /DEBUG)
-else ()
-    target_link_libraries( ${PROJ_NAME} -pthread )
 endif ( MSVC )
