@@ -156,6 +156,11 @@ set(
 set(
   SOURCES
   Avatar.cpp
+  AvatarModel.cpp
+  AvatarRenderer.cpp
+  AvatarPoseSequence.cpp
+  AvatarHelpers.cpp
+
   BGSubtractor.cpp
   DepthCamera.cpp
   RTree.cpp
@@ -164,7 +169,7 @@ set(
   GaussianMixture.cpp
   SparseImage.cpp
   Util.cpp
-  ViconSkeleton.cpp
+  # ViconSkeleton.cpp
   cnpy.cpp
 )
 
@@ -181,9 +186,13 @@ set(
   ${INCLUDE_DIR}/SparseImage.h
   ${INCLUDE_DIR}/Util.h
   ${INCLUDE_DIR}/UtilCnpy.h
-  ${INCLUDE_DIR}/ViconSkeleton.h
+  # ${INCLUDE_DIR}/ViconSkeleton.h
   ${INCLUDE_DIR}/nanoflann.hpp
   ${INCLUDE_DIR}/cnpy.h
+)
+set(
+  PRIVATE_HEADERS
+  ${INCLUDE_DIR}/internal/AvatarHelpers.h
 )
 
 #  Set up configs
@@ -315,3 +324,5 @@ endif ()
 if ( MSVC )
     set_property(TARGET ${PROJ_NAME} APPEND PROPERTY LINK_FLAGS /DEBUG)
 endif ( MSVC )
+source_group( "Header Files" FILES ${HEADERS} ${PRIVATE_HEADERS} )
+source_group( "Source Files" FILES ${SOURCES} )

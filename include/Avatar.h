@@ -120,7 +120,7 @@ struct AvatarModel {
     CloudType initialJointPos;
 
     /** ADVANCED: Joint regressor for recovering joint positions from surface
-     * points (num points, num joints) */
+     * points (num points,  num joints) */
     Eigen::SparseMatrix<double> jointRegressor;
 
     /** ADVANCED: Whether to use the new 'joint shape regressor'
