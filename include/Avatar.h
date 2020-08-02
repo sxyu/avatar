@@ -79,7 +79,7 @@ struct AvatarModel {
     /** Get number of joints */
     inline int numJoints() const { return parent.rows(); }
     /** Get number of skin points */
-    inline int numPoints() const { return assignWeights.cols(); }
+    inline int numPoints() const { return weights.cols(); }
     /** Get number of shape keys */
     inline int numShapeKeys() const { return keyClouds.cols(); }
     /** Get number of polygon faces */
@@ -138,13 +138,8 @@ struct AvatarModel {
      *  (num joints * 3, num shapekeys) */
     Eigen::MatrixXd jointShapeReg;
 
-    /** ADVANCED: Raw LBS Weights (num points, num joints) */
+    /** ADVANCED: Raw LBS Weights (num joints, num points) */
     Eigen::SparseMatrix<double> weights;
-
-    /** ADVANCED: Assignment weights: weights for point-joints assignments.
-     *  Columns are recorded in 'assignment' indices,
-     *  see assignStarts below. (num assignments total, num points) */
-    Eigen::SparseMatrix<double> assignWeights;
 
     /** ADVANCED: Start index of each joint's assigned points
      *  as in rows of assignWeights (num joints + 1);
@@ -214,17 +209,14 @@ class Avatar {
     /** Current joint positions (3, num joints) */
     CloudType jointPos;
 
-    /** Current joint rotations */
-    std::vector<Eigen::Matrix3d, Mat3Alloc> jointRot;
+    /** Current joint transforms (12, num joints) each 12 is (3, 4) matrix
+     * colmajor */
+    Eigen::Matrix<double, 12, Eigen::Dynamic> jointTrans;
 
    private:
     /** INTERNAL for caching use: baseCloud after applying shape keys (3 * num
      * points) */
     Eigen::VectorXd shapedCloudVec;
-
-    /** INTERNAL for caching use: Position of points relative to each assigned
-     * point (3, num assignments total) */
-    CloudType assignVecs;
 };
 
 /** A sequence of avatar poses */

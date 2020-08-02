@@ -20,12 +20,12 @@ int main(int argc, char** argv) {
     // LBS weights color visualization
     auto& smpl_mesh_lbs =
         viewer
-            .add_mesh(
-                ava.cloud.transpose().cast<float>(), faces,
-                /* use vertex-based colorization, by passing n-by-3
-                   matrix as 3rd argument */
-                model.weights.cast<float>() *
-                    ark::util::paletteColorTable(model.numJoints()).transpose())
+            .add_mesh(ava.cloud.transpose().cast<float>(), faces,
+                      /* use vertex-based colorization, by passing n-by-3
+                         matrix as 3rd argument */
+                      (ark::util::paletteColorTable(model.numJoints()) *
+                       model.weights.cast<float>())
+                          .transpose())
             .translate(Eigen::Vector3f(2.0f, 0.f, 0.f));
 
     // Joints

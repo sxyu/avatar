@@ -185,6 +185,36 @@ inline Eigen::Matrix<T, 3, 3, Option> rodrigues(
         return c * eye + (1 - c) * r * r.transpose() + s * skew;
     }
 }
+
+// Affine transformation matrix (hopefully) faster multiplication
+// bottom row omitted
+template <class T, int Option = Eigen::ColMajor>
+inline void mulAffine(const Eigen::Ref<const Eigen::Matrix<T, 3, 4, Option>>& a,
+                      Eigen::Ref<Eigen::Matrix<T, 3, 4, Option>> b) {
+    b.template leftCols<3>() =
+        a.template leftCols<3>() * b.template leftCols<3>();
+    b.template rightCols<1>() =
+        a.template rightCols<1>() +
+        a.template leftCols<3>() * b.template rightCols<1>();
+}
+
+// Affine transformation matrix 'in-place' inverse
+template <class T, int Option = Eigen::ColMajor>
+inline void invAffine(
+    const Eigen::Ref<const Eigen::Matrix<T, 3, 4, Option>>& a) {
+    a.template leftCols<3>() = a.template leftCols<3>().inverse();
+    a.template rightCols<1>() =
+        -a.template leftCols<3>() * a.template rightCols<1>();
+}
+
+// Homogeneous transformation matrix in-place inverse
+template <class T, int Option = Eigen::ColMajor>
+inline void invHomogeneous(
+    const Eigen::Ref<const Eigen::Matrix<T, 3, 4, Option>>& a) {
+    a.template leftCols<3>().transposeInPlace();
+    a.template rightCols<1>() =
+        -a.template leftCols<3>() * a.template rightCols<1>();
+}
 }  // namespace util
 
 // Randomization utilities

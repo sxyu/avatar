@@ -361,8 +361,10 @@ AvatarModel::AvatarModel(const std::string& model_dir,
         // Load LBS weights
         const auto& wt_raw = npz.at("weights");
         assertShape(wt_raw, {n_verts, n_joints});
-        weights.resize(n_verts, n_joints);
-        weights = util::loadFloatMatrix(wt_raw, n_verts, n_joints).sparseView();
+        weights.resize(n_joints, n_verts);
+        weights = util::loadFloatMatrix(wt_raw, n_verts, n_joints)
+                      .transpose()
+                      .sparseView();
         weights.makeCompressed();
 
         // (Compatibility with existing code)
@@ -374,8 +376,8 @@ AvatarModel::AvatarModel(const std::string& model_dir,
                 int r = it.row(), c = it.col();
                 double wt = it.value();
                 if (wt > 1e-12) {
-                    assignedJoints[r].push_back({wt, c});
-                    assignedPoints[c].push_back({wt, r});
+                    assignedJoints[c].push_back({wt, r});
+                    assignedPoints[r].push_back({wt, c});
                 }
             }
         }
@@ -448,6 +450,8 @@ AvatarModel::AvatarModel(const std::string& model_dir,
         }
 
         // Process joint assignments
+        weights.resize(nJoints, nPoints);
+        weights.reserve(3 * nPoints);
         assignedPoints.resize(nJoints);
         for (int i = 0; i < nJoints; ++i) {
             assignedPoints[i].reserve(7000 / nJoints);
@@ -462,6 +466,7 @@ AvatarModel::AvatarModel(const std::string& model_dir,
                 double w;
                 skel >> joint >> w;
                 assignedJoints[i].emplace_back(w, joint);
+                weights.insert(joint, i) = w;
             }
             std::sort(assignedJoints[i].begin(), assignedJoints[i].end(),
                       [](const std::pair<double, int>& a,
@@ -566,23 +571,6 @@ AvatarModel::AvatarModel(const std::string& model_dir,
         totalAssignments += assignedJoints[i].size();
     }
 
-    // Compute assignStarts/assignWeights
-    size_t totalPoints = 0;
-    assignStarts.resize(numJoints() + 1);
-    assignWeights =
-        Eigen::SparseMatrix<double>(totalAssignments, assignedJoints.size());
-    assignWeights.reserve(Eigen::VectorXi::Constant(numPoints(), 4));
-    for (int i = 0; i < numJoints(); ++i) {
-        assignStarts[i] = totalPoints;
-        for (auto& assignment : assignedPoints[i]) {
-            int p = assignment.second;
-            assignWeights.insert(totalPoints, p) = assignment.first;
-            ++totalPoints;
-        }
-    }
-    assignWeights.makeCompressed();
-    assignStarts[numJoints()] = totalPoints;
-
     // Maybe load pose prior
     posePrior.load(posePriorPath.string());
 }
@@ -598,7 +586,6 @@ Eigen::VectorXd AvatarPoseSequence::getFrame(size_t frame_id) const {
 }
 
 Avatar::Avatar(const AvatarModel& model) : model(model) {
-    assignVecs.resize(3, model.assignWeights.rows());
     w.resize(model.numShapeKeys());
     r.resize(model.numJoints());
     w.setZero();
@@ -627,46 +614,40 @@ void Avatar::update() {
     } else {
         jointPos.noalias() = shapedCloud * model.jointRegressor;
     }
-    // _ARK_PROFILE(REGR);
 
-    /** Update joint assignment/position constants */
-    size_t j = 0;
-    for (int i = 0; i < model.numJoints(); ++i) {
-        auto col = jointPos.col(i);
-        for (auto& assignment : model.assignedPoints[i]) {
-            int idx = assignment.second;
-            assignVecs.col(j++).noalias() = shapedCloud.col(idx) - col;
-        }
-    }
-
-    for (int i = model.numJoints() - 1; i > 0; --i) {
-        jointPos.col(i).noalias() -= jointPos.col(model.parent[i]);
-    }
-    // _ARK_PROFILE(ASV_POS);
     /** END of shape update, BEGIN pose update */
 
     /** Compute each joint's transform */
-    // jointRot.clear();
-    jointRot.resize(model.numJoints());
-    jointRot[0].noalias() = r[0];
-
-    jointPos.col(0) = p; /** Add root position to all joints */
+    jointTrans.resize(jointTrans.RowsAtCompileTime, model.numJoints());
+    using TransformMap = Eigen::Map<Eigen::Matrix<double, 3, 4>>;
+    /** Root joint joints */
+    TransformMap jt0(jointTrans.data());
+    jt0.leftCols<3>().noalias() = r[0];
+    jt0.rightCols<1>() = p;  // Root position at center (non-standard!)
     for (size_t i = 1; i < model.numJoints(); ++i) {
-        jointRot[i].noalias() = jointRot[model.parent[i]] * r[i];
-        jointPos.col(i) = jointRot[model.parent[i]] * jointPos.col(i) +
-                          jointPos.col(model.parent[i]);
+        TransformMap jti(jointTrans.col(i).data());
+        jti.leftCols<3>().noalias() = r[i];
+        jti.rightCols<1>().noalias() =
+            jointPos.col(i) - jointPos.col(model.parent[i]);
+        util::mulAffine<double, Eigen::ColMajor>(
+            TransformMap(jointTrans.col(model.parent[i]).data()), jti);
+    }
+
+    for (int i = 0; i < model.numJoints(); ++i) {
+        TransformMap jti(jointTrans.col(i).data());
+        Eigen::Vector3d jPosInit = jointPos.col(i);
+        jointPos.col(i).noalias() = jti.rightCols<1>();
+        jti.rightCols<1>().noalias() -= jti.leftCols<3>() * jPosInit;
     }
 
     /** Compute each point's transform */
-    for (int i = 0; i < model.numJoints(); ++i) {
-        Eigen::Map<CloudType> block(
-            assignVecs.data() + 3 * model.assignStarts[i], 3,
-            model.assignStarts[i + 1] - model.assignStarts[i]);
-        block = jointRot[i] * block;
-        block.colwise() += jointPos.col(i);
+    cloud.resize(3, model.numPoints());
+
+    typeof(jointTrans) pointTrans = jointTrans * model.weights;
+    for (size_t i = 0; i < model.numPoints(); ++i) {
+        TransformMap pti(pointTrans.col(i).data());
+        cloud.col(i).noalias() = pti * shapedCloud.col(i).homogeneous();
     }
-    // _ARK_PROFILE(TRANSFORM);
-    cloud.noalias() = assignVecs * model.assignWeights;
     _ARK_PROFILE(UPDATE);
 }
 

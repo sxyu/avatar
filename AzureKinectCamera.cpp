@@ -257,8 +257,7 @@ void AzureKinectCamera::update(cv::Mat &xyz_map, cv::Mat &rgb_map,
     if (scale == 1.0) {
         xyz_map = xyz_map_large;
     } else {
-        cv::resize(xyz_map_large, xyz_map, xyz_map.size(), 0., 0.,
-                   cv::INTER_NEAREST);
+        cv::resize(xyz_map_large, xyz_map, xyz_map.size());
     }
 
     // get timestamp and convert to nanoseconds

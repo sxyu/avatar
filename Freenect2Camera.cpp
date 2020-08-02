@@ -154,8 +154,7 @@ void Freenect2Camera::update(cv::Mat &xyz_map, cv::Mat &rgb_map,
     }
     if (NEED_RESIZE) {
         cv::resize(rgb_tmp, rgb_map, cv::Size(_scaled_width, _scaled_height));
-        cv::resize(xyz_tmp, xyz_map, cv::Size(_scaled_width, _scaled_height),
-                   0., 0., cv::INTER_NEAREST);
+        cv::resize(xyz_tmp, xyz_map, cv::Size(_scaled_width, _scaled_height));
     }
 
     timestamp =
