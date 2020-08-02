@@ -1,4 +1,17 @@
-## OpenARK Avatar Development Project
+## AR/VR *Avatar* Project: Fitting SMPL body model to depth data in real time on CPU (Fall 2019)
+
+**Demo video**: <https://drive.google.com/file/d/1KQ0g_R77x80c6WbFKTXefvsNO9F1ITxW/view?usp=sharing>
+
+**Contains**
+- SMPL model loader and representation in C++ (Avatar)
+- Fast SMPL parameter optimizer (wrt. a point cloud) based on Ceres-solver (AvatarOptimizer)
+- Real-time human body segmentation system using random forest, with weights provided (RTree)
+   - Custom random forest implementation and parallelized training system provided
+- Basic first-frame background subtraction system (BGSubtractor)
+- Gaussian mixture model to inform likely poses, as in SMPLify (GaussianMixture)
+- DepthCamera interface from OpenARK (AzureKinectCamera/DepthCamera)
+- C++ Vicon skeleton (asf/amc) loader to pose and animate the SMPL model
+- Other miscellaneous utilities such as data recording
 
 ![Pipeline](https://raw.githubusercontent.com/sxyu/smplsynth/master/images/pipeline.png)
 
