@@ -297,6 +297,4 @@ int main(int argc, char** argv) {
         _ARK_ASSERT_LT(0.f, intrin.fx);
         std::cout << "Verified" << std::endl;
     }
-
-    std::exit(0);
 }

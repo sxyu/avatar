@@ -21,8 +21,6 @@ DepthCamera::~DepthCamera() {
     endCapture();
 }
 
-void DepthCamera::captureThreadCleanUp() {}
-
 void DepthCamera::beginCapture(int fps_cap, bool remove_noise) {
     if (deviceOpenFlag == false) {
         std::cerr << "WARNING: beginCapture called on non-opened camera.\n";
@@ -30,10 +28,9 @@ void DepthCamera::beginCapture(int fps_cap, bool remove_noise) {
     }
     _ARK_ASSERT(captureInterrupt);
     captureInterrupt = false;
-    std::thread thd([this, fps_cap, remove_noise]() {
+    captureThd = std::make_unique<std::thread>([this, fps_cap, remove_noise] {
         using namespace std::chrono;
-        steady_clock::time_point lastTime;
-        steady_clock::time_point currTime;
+        steady_clock::time_point lastTime, currTime;
         float timePerFrame;
         if (fps_cap > 0) {
             timePerFrame = 1e9f / fps_cap;
@@ -57,12 +54,16 @@ void DepthCamera::beginCapture(int fps_cap, bool remove_noise) {
                 lastTime = currTime;
             }
         }
-        captureThreadCleanUp();
     });
-    thd.detach();
 }
 
-void DepthCamera::endCapture() { captureInterrupt = true; }
+void DepthCamera::endCapture() {
+    captureInterrupt = true;
+    if (captureThd) {
+        captureThd->join();
+        captureThd.reset();
+    }
+}
 
 bool DepthCamera::nextFrame(bool removeNoise) {
     // initialize back buffers

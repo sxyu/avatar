@@ -5,6 +5,7 @@
 #include <mutex>
 #include <map>
 #include <memory>
+#include <thread>
 
 #include "Util.h"
 #include "Calibration.h"
@@ -42,11 +43,6 @@ class DepthCamera {
      * Destructor for the DepthCamera class (automatically stops capturing)
      */
     virtual ~DepthCamera();
-
-    /**
-     * Called by the capture thread when exiting. Useful for cleaning up stuff
-     **/
-    virtual void captureThreadCleanUp();
 
    protected:
     // Section A.1: Protected methods that must be implemented in child camera
@@ -334,5 +330,8 @@ class DepthCamera {
     cv::Mat irMapBuf;
     cv::Mat ampMapBuf;
     cv::Mat flagMapBuf;
+
+    /** Thread **/
+    std::unique_ptr<std::thread> captureThd;
 };
 }  // namespace ark
