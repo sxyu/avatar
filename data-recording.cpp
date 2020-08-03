@@ -149,7 +149,7 @@ int main(int argc, char** argv) {
 
         // If failed to opened camera
         if (!camera->isCapturing()) {
-            std::cerr << "Failed to open camera quitting..\n";
+            std::cerr << "Failed to open camera, quitting...\n";
             return 1;
         }
         // Read in camera input and save it to the buffer

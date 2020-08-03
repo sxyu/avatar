@@ -232,6 +232,11 @@ int main(int argc, char** argv) {
     // Turn on the camera
     camera->beginCapture();
 
+    if (!camera->isCapturing()) {
+        std::cerr << "Failed to open camera, quitting...\n";
+        return 1;
+    }
+
     // Read in camera input and save it to the buffer
     std::vector<uint64_t> timestamps;
 
