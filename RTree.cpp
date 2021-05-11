@@ -10,6 +10,7 @@
 #include <mutex>
 #include <iomanip>
 #include <iostream>
+#include <numeric>
 #include <opencv2/imgcodecs.hpp>
 #include <boost/filesystem.hpp>
 #include <Eigen/StdVector>

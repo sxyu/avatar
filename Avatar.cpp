@@ -66,7 +66,7 @@ void Avatar::update() {
     /** Compute each point's transform */
     cloud.resize(3, model.numPoints());
 
-    typeof(jointTrans) pointTrans = jointTrans * model.weights;
+    Eigen::Matrix<double, 12, Eigen::Dynamic> pointTrans = jointTrans * model.weights;
     for (size_t i = 0; i < model.numPoints(); ++i) {
         TransformMap pti(pointTrans.col(i).data());
         cloud.col(i).noalias() = pti * shapedCloud.col(i).homogeneous();

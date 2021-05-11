@@ -4,6 +4,7 @@
 #include <Eigen/Dense>
 #include <fstream>
 #include <iostream>
+#include <cmath>
 
 #include "Util.h"
 

@@ -29,7 +29,7 @@ namespace ark {
 
             {
                 std::atomic<int> row(0);
-                auto check = [size, nn_dist_thresh, &background](int rr, int cc, const cv::Vec3f& val, uint8_t& invalid_bit) {
+                auto check = [size, nn_dist_thresh, &background, INVALID](int rr, int cc, const cv::Vec3f& val, uint8_t& invalid_bit) {
                     int minc = std::max(cc - size, 0), maxc = std::min(cc + size, background.cols - 1);
                     int minr = std::max(rr - size, 0), maxr = std::min(rr + size, background.rows - 1);
                     // float best_norm = std::numeric_limits<float>::max();

@@ -323,6 +323,10 @@ endif ()
 
 if ( MSVC )
     set_property(TARGET ${PROJ_NAME} APPEND PROPERTY LINK_FLAGS /DEBUG)
+
 endif ( MSVC )
+if(WIN32)
+	add_definitions(-DNOMINMAX -D_USE_MATH_DEFINES)
+endif()
 source_group( "Header Files" FILES ${HEADERS} ${PRIVATE_HEADERS} )
 source_group( "Source Files" FILES ${SOURCES} )
