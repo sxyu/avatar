@@ -35,6 +35,17 @@ set( MESHVIEW_DIR "${VENDOR_DIR}/meshview" )
 
 if ( CMAKE_COMPILER_IS_GNUCXX OR (CMAKE_CXX_COMPILER_ID MATCHES "Clang") )
     set( CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-deprecated -Wno-deprecated-declarations -O3 -funroll-loops -g" )
+elseif( MSVC )
+    set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} /MTd")
+    set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} /MT /GLT /Ox")
+    set(CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG} /MTd")
+    set(CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS_RELEASE} /MT /GLT")
+    # Silence deprecation warning coming from Eigen; silence secure warning
+    add_definitions(-D_SILENCE_CXX17_RESULT_OF_DEPRECATION_WARNING -D_CRT_SECURE_NO_WARNINGS)
+endif ( )
+
+if ( CMAKE_COMPILER_IS_GNUCXX OR (CMAKE_CXX_COMPILER_ID MATCHES "Clang") )
+    set( CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-deprecated -Wno-deprecated-declarations -O3 -funroll-loops -g" )
 endif ( )
 
 # Git submodule auto update
@@ -114,9 +125,13 @@ else()
 endif ()
 
 # require Boost
+if (NOT MSVC)
 set( Boost_USE_STATIC_LIBS ON )
 set( Boost_USE_STATIC ON )
+endif()
 find_package( Boost REQUIRED COMPONENTS filesystem program_options thread system )
+add_definitions( -DBOOST_ALL_NO_LIB )
+add_definitions( -DBOOST_ALL_DYN_LINK )
 
 # require Ceres
 find_package( Ceres REQUIRED )
