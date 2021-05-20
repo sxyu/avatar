@@ -74,11 +74,8 @@ For unknown reasons, sometimes I encounter linker errors when not manually linki
 
 ### Getting model data
 
-Please get the data from me via email sxyu (at) berkeley.edu. (This is not allowed to be shared so I am not putting the link here). Then put it in this directory:
-`<smplsynth-repo-root>/data`
-
-So that the following exists:
-`<smplsynth-repo-root>/data/avatar-model/skeleton.txt`
+*New* please see Github releases on how to get model data.
+https://github.com/sxyu/avatar/releases
 
 ## License
 Apache 2.0
